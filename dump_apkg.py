@@ -69,10 +69,10 @@ def _generate_text(notes, output_dir):
         fields = note[0].split('\x1f')
         guid = note[1]
         
-        # Assume first two fields are Front and Back
+        # Assume back is only the last field
         if len(fields) >= 2:
-            front = fields[0].strip()
-            back = fields[1].strip()
+            front = '\x1f'.join(fields[0:-1]).strip().replace('\n','\x1f')
+            back = fields[-1].strip().replace('\n','\x1f')
             # We don't need to strip HTML tags because the user wants to preserve them for the text format
             # (so they can be re-imported with formatting)
             text_content.append(f"[{guid}] {front} :: {back}")

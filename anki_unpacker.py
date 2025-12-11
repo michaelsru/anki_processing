@@ -68,7 +68,15 @@ class AnkiDeckUnpacker:
                 print("Media file is empty.")
                 media_map = {}
             else:
-                media_map = json.loads(data)
+                try:
+                    media_map = json.loads(data)
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    print("⚠️  JSON decode failed. Trying Protobuf parser...")
+                    try:
+                        media_map = self._parse_protobuf_media(data)
+                    except Exception as e:
+                        print(f"❌ Protobuf parse failed: {e}")
+                        media_map = {}
             
             # Rename the numbered files to their original extensions
             for numeric_name, original_name in media_map.items():
@@ -78,6 +86,80 @@ class AnkiDeckUnpacker:
                     os.rename(old_path, new_path)
             
             os.remove(media_map_path) # cleanup
+
+    def _parse_protobuf_media(self, data):
+        """Parses Anki's protobuf media format."""
+        media_map = {}
+        pos = 0
+        length = len(data)
+        
+        def read_varint(pos):
+            result = 0
+            shift = 0
+            while True:
+                if pos >= length:
+                    raise IndexError("Varint read out of bounds")
+                b = data[pos]
+                pos += 1
+                result |= (b & 0x7f) << shift
+                if not (b & 0x80):
+                    return result, pos
+                shift += 7
+        
+        while pos < length:
+            # Read tag
+            tag, pos = read_varint(pos)
+            field_number = tag >> 3
+            wire_type = tag & 7
+            
+            if field_number == 1 and wire_type == 2: # MediaEntry message
+                msg_len, pos = read_varint(pos)
+                end_pos = pos + msg_len
+                
+                filename = None
+                idx = None
+                
+                while pos < end_pos:
+                    inner_tag, pos = read_varint(pos)
+                    inner_field = inner_tag >> 3
+                    inner_type = inner_tag & 7
+                    
+                    if inner_field == 1 and inner_type == 2: # Filename
+                        str_len, pos = read_varint(pos)
+                        filename = data[pos:pos+str_len].decode('utf-8', errors='replace')
+                        pos += str_len
+                    elif inner_field == 2 and inner_type == 0: # Index
+                        idx, pos = read_varint(pos)
+                    elif inner_type == 2: # Skip length delimited (e.g. checksum)
+                        skip_len, pos = read_varint(pos)
+                        pos += skip_len
+                    elif inner_type == 0: # Skip varint
+                        _, pos = read_varint(pos)
+                    elif inner_type == 5: # Skip 32-bit
+                        pos += 4
+                    elif inner_type == 1: # Skip 64-bit
+                        pos += 8
+                    else:
+                        # Should not happen in this specific format, but good to be safe
+                        # If we don't know the type, we can't skip it easily without a schema
+                        # But we assume valid Anki protobuf
+                        pass
+                
+                if filename is not None and idx is not None:
+                    media_map[str(idx)] = filename
+            else:
+                # Skip top-level unknown fields
+                if wire_type == 2:
+                    skip_len, pos = read_varint(pos)
+                    pos += skip_len
+                elif wire_type == 0:
+                    _, pos = read_varint(pos)
+                elif wire_type == 5:
+                    pos += 4
+                elif wire_type == 1:
+                    pos += 8
+                    
+        return media_map
 
     def _prepare_database(self):
         # Check for newer Anki format (collection.anki21b)
