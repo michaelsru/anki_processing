@@ -108,10 +108,12 @@ def create_deck(deck_name, cards):
 def parse_arguments():
     """Parse and validate command line arguments."""
     if len(sys.argv) < 2:
-        print("Usage: python generate_anki_from_text.py <cards.txt>")
-        sys.exit(1)
+        default_path = os.path.join("anki_review_output", "cards.txt")
+        print(f"ℹ️  No input file specified. Defaulting to: {default_path}")
+        input_path = default_path
+    else:
+        input_path = sys.argv[1]
     
-    input_path = sys.argv[1]
     if not os.path.exists(input_path):
         print(f"❌ File not found: {input_path}")
         sys.exit(1)
@@ -127,8 +129,41 @@ def get_deck_name(input_path):
     """Extract deck name from file path (filename without extension)."""
     return os.path.splitext(os.path.basename(input_path))[0]
 
+def archive_all_decks(output_dir):
+    """Move all existing .apkg files in output_dir to the archive folder."""
+    if not os.path.exists(output_dir):
+        return
+
+    archive_dir = os.path.join(output_dir, "archive")
+    if not os.path.exists(archive_dir):
+        os.makedirs(archive_dir)
+
+    for filename in os.listdir(output_dir):
+        filepath = os.path.join(output_dir, filename)
+        
+        # Skip directories and non-apkg files
+        if os.path.isdir(filepath) or not filename.endswith(".apkg"):
+            continue
+
+        target_path = os.path.join(archive_dir, filename)
+        
+        # If file exists in archive, append counter
+        if os.path.exists(target_path):
+            base, ext = os.path.splitext(filename)
+            counter = 1
+            while os.path.exists(os.path.join(archive_dir, f"{base}_{counter}{ext}")):
+                counter += 1
+            target_path = os.path.join(archive_dir, f"{base}_{counter}{ext}")
+
+        os.rename(filepath, target_path)
+        print(f"📦 Archived: {filename} -> {target_path}")
+
 def export_deck(deck, filename):
     """Export a deck to an .apkg file and print confirmation."""
+    # Archive all existing decks in the output directory before saving the new one
+    output_dir = os.path.dirname(filename)
+    archive_all_decks(output_dir)
+    
     genanki.Package(deck).write_to_file(filename)
     print(f"✅ Deck exported to {filename} ({len(deck.notes)} cards)")
     return filename
@@ -145,8 +180,12 @@ def main():
         print("❌ No valid cards found.")
         sys.exit(1)
         
+    output_dir = "generated_decks"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        
     date_str = datetime.now().strftime("%Y-%m-%d")
-    output_filename = f"{deck_name}_{date_str}.apkg"
+    output_filename = os.path.join(output_dir, f"{deck_name}_{date_str}.apkg")
     
     export_deck(deck, output_filename)
 
