@@ -5,6 +5,7 @@ import random
 import sys
 import os
 from datetime import datetime
+from verify_guids import verify
 
 # Define Models Globally
 SHARED_CSS = """
@@ -19,7 +20,7 @@ SHARED_CSS = """
 }
 .cloze {
     font-weight: bold;
-    color: lightblue;
+    color: blue;
 }
 .answer {
     color: blue;
@@ -188,6 +189,15 @@ def main():
     output_filename = os.path.join(output_dir, f"{deck_name}_{date_str}.apkg")
     
     export_deck(deck, output_filename)
+
+    # Verify GUIDs
+    print("\n--- Verifying GUIDs ---")
+    try:
+        verify(input_path, output_filename)
+    except ImportError:
+        print("Warning: verify_guids module not found. Skipping verification.")
+    except Exception as e:
+        print(f"Warning: Verification failed: {e}")
 
 if __name__ == '__main__':
     main()

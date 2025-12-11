@@ -4,6 +4,7 @@ import os
 import shutil
 import argparse
 from anki_unpacker import AnkiDeckUnpacker
+from verify_guids import verify
 
 def unpack_and_review(apkg_path, output_dir="anki_review_output"):
     # 1. Prepare Output Directory
@@ -84,12 +85,26 @@ def _generate_text(notes, output_dir):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Extract and review Anki deck content.')
-    parser.add_argument('apkg_path', type=str, help='Path to the Anki .apkg file')
-    parser.add_argument('--output_dir', type=str, default='anki_review_output', help='Output directory for extracted files')
+    parser = argparse.ArgumentParser(description='Unpack Anki APKG file to HTML/Text for review')
+    parser.add_argument('apkg_path', help='Path to the .apkg file')
+    parser.add_argument('--output_dir', default='anki_review_output', help='Directory to output files')
     
     args = parser.parse_args()
+    
+    if not os.path.exists(args.apkg_path):
+        print(f"Error: File not found: {args.apkg_path}")
+        return
+
     unpack_and_review(args.apkg_path, args.output_dir)
+
+    # Verify GUIDs
+    print("\n--- Verifying GUIDs ---")
+    try:
+        verify(os.path.join(args.output_dir, "cards.txt"), args.apkg_path)
+    except ImportError:
+        print("Warning: verify_guids module not found. Skipping verification.")
+    except Exception as e:
+        print(f"Warning: Verification failed: {e}")
 
 if __name__ == "__main__":
     main()
