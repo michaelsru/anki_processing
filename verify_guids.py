@@ -80,19 +80,19 @@ def verify(txt_path, apkg_path, verbose=False):
         print("✅ SUCCESS: All GUIDs match!")
     else:
         if missing:
-            print(f"{len(missing)} New cards found in {txt_path}")
+            print(f"{len(missing)} mismatched cards found in {txt_path}")
             if verbose:
                 for guid in missing:
-                    print(f"✅ [NEW] {expected_cards.get(guid, 'Unknown')}")
+                    print(f"✅ [MISMATCHED] {expected_cards.get(guid, 'Unknown')}")
             # else:
             #     for guid in missing:
             #         print(f"✅ {guid}")
                     
         if unexpected:
-            print(f"{len(unexpected)} Deleted cards found in {apkg_path}")
+            print(f"{len(unexpected)} mismatched cards found in {apkg_path}")
             if verbose:
                 for guid in unexpected:
-                    print(f"❌ [DELETED] {actual_cards.get(guid, 'Unknown')}")
+                    print(f"❌ [MISMATCHED] {actual_cards.get(guid, 'Unknown')}")
             # else:
             #     for guid in unexpected:
             #         print(f"❌ {guid}")
