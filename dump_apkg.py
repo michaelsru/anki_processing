@@ -62,7 +62,7 @@ def _generate_html(notes, output_dir, deck_name):
 
 def _generate_text(notes, output_dir):
     """Generates a Raw Text File ([GUID] Front :: Back)."""
-    txt_path = os.path.join(output_dir, "deck_raw.txt")
+    txt_path = os.path.join(output_dir, "cards.txt")
     text_content = []
     
     for note in notes:

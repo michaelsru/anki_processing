@@ -7,6 +7,25 @@ import os
 from datetime import datetime
 
 # Define Models Globally
+SHARED_CSS = """
+.card {
+    font-family: arial;
+    font-size: 20px;
+    text-align: left;
+    color: black;
+    background-color: white;
+    line-height: 1.5;
+    padding: 20px;
+}
+.cloze {
+    font-weight: bold;
+    color: lightblue;
+}
+.answer {
+    color: blue;
+}
+"""
+
 BASIC_MODEL_ID = 1607392319
 BASIC_MODEL = genanki.Model(
     model_id=BASIC_MODEL_ID,
@@ -15,8 +34,9 @@ BASIC_MODEL = genanki.Model(
     templates=[{
         'name': 'Card 1',
         'qfmt': '{{Front}}',
-        'afmt': '{{Front}}<hr>{{Back}}',
+        'afmt': '{{Front}}<hr><div class="answer">{{Back}}</div>',
     }],
+    css=SHARED_CSS
 )
 
 CLOZE_MODEL_ID = 9988776655  # Fixed ID for Cloze model
@@ -29,19 +49,7 @@ CLOZE_MODEL = genanki.Model(
         'qfmt': '{{cloze:Text}}',
         'afmt': '{{cloze:Text}}<br><br>{{Extra}}',
     }],
-    css="""
-    .card {
-        font-family: arial;
-        font-size: 20px;
-        text-align: left;
-        color: black;
-        background-color: white;
-    }
-    .cloze {
-        font-weight: bold;
-        color: lightblue;
-    }
-    """,
+    css=SHARED_CSS,
 )
 
 def create_deck(deck_name, cards):
