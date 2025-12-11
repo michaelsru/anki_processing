@@ -14,7 +14,10 @@ def unpack_and_review(apkg_path, output_dir="anki_review_output"):
     
     unpacker = AnkiDeckUnpacker(apkg_path)
     unpacker.unpack()
-    unpacker.export_media(output_dir)
+    
+    # Export media to nested 'media' folder
+    media_dir = os.path.join(output_dir, "media")
+    unpacker.export_media(media_dir)
     
     try:
         notes = unpacker.get_notes()
@@ -47,6 +50,9 @@ def _generate_html(notes, output_dir, deck_name):
         
         card_html = f'<div class="card" data-guid="{guid}">'
         for i, field in enumerate(fields):
+            # Update image paths to point to media folder
+            field = field.replace('src="', 'src="media/')
+            
             if i > 0:
                 card_html += '<div class="field-sep"></div>'
             card_html += f'<div>{field}</div>'
