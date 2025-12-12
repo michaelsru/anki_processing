@@ -27,35 +27,92 @@ SHARED_CSS = """
 }
 """
 
-BASIC_MODEL_ID = 1607392319
-BASIC_MODEL = genanki.Model(
-    model_id=BASIC_MODEL_ID,
-    name='Basic Model',
-    fields=[{'name': 'Front'}, {'name': 'Back'}],
-    templates=[{
-        'name': 'Card 1',
-        'qfmt': '{{Front}}',
-        'afmt': '{{Front}}<hr><div class="answer">{{Back}}</div>',
-    }],
-    css=SHARED_CSS
-)
+def create_basic_model(num_fields):
+    """Creates a Basic model with num_fields."""
+    fields = [{'name': f'Field {i+1}'} for i in range(num_fields)]
+    
+    # Build Back template: Field 2 <br> Field 3 ...
+    back_fmt = '{{FrontSide}}<hr><div class="answer">'
+    for i in range(1, num_fields):
+        back_fmt += f'{{{{Field {i+1}}}}}<br>'
+    back_fmt += '</div>'
+    
+    return genanki.Model(
+        model_id=1607392319 + num_fields, # Ensure unique ID per field count
+        name=f'Basic Model ({num_fields} fields)',
+        fields=fields,
+        templates=[{
+            'name': 'Card 1',
+            'qfmt': '{{Field 1}}',
+            'afmt': back_fmt,
+        }],
+        css=SHARED_CSS
+    )
 
-CLOZE_MODEL_ID = 9988776655  # Fixed ID for Cloze model
-CLOZE_MODEL = genanki.Model(
-    model_id=CLOZE_MODEL_ID,
-    name='Cloze Model',
-    fields=[{'name': 'Text'}, {'name': 'Extra'}],
-    templates=[{
-        'name': 'Cloze Card',
-        'qfmt': '{{cloze:Text}}',
-        'afmt': '{{cloze:Text}}<br><br>{{Extra}}',
-    }],
-    css=SHARED_CSS,
-)
+def create_cloze_model(num_fields):
+    """Creates a Cloze model with num_fields."""
+    # Ensure at least 2 fields (Text, Extra)
+    num_fields = max(2, num_fields)
+    
+    fields = [{'name': 'Text'}, {'name': 'Extra'}]
+    for i in range(2, num_fields):
+        fields.append({'name': f'Field {i+1}'})
+        
+    # Build Back template: Extra <br> Field 3 ...
+    back_fmt = '{{cloze:Text}}<br><br>{{Extra}}'
+    for i in range(2, num_fields):
+        back_fmt += f'<br>{{{{Field {i+1}}}}}'
+        
+    return genanki.Model(
+        model_id=9988776655 + num_fields,
+        name=f'Cloze Model ({num_fields} fields)',
+        fields=fields,
+        templates=[{
+            'name': 'Cloze Card',
+            'qfmt': '{{cloze:Text}}',
+            'afmt': back_fmt,
+        }],
+        css=SHARED_CSS,
+        model_type=genanki.Model.CLOZE
+    )
+
+def analyze_field_counts(cards):
+    """Scans all cards to find max field counts for Basic and Cloze types."""
+    max_basic = 2
+    max_cloze = 2
+    
+    for line in cards:
+        if line.strip().startswith('#') or not line.strip():
+            continue
+            
+        line = line.strip()
+        if line.startswith('[') and '] ' in line:
+            _, _, line = line.partition('] ')
+            line = line.strip()
+            
+        fields = line.split(" :: ")
+        # Fallback split check
+        if len(fields) == 1 and "::" in line and not "{{c" in line:
+             fields = line.split("::")
+             
+        count = len(fields)
+        
+        if '{{c' in line:
+            max_cloze = max(max_cloze, count)
+        else:
+            max_basic = max(max_basic, count)
+            
+    return max_basic, max_cloze
 
 def create_deck(deck_name, cards):
     """Creates a single deck containing both Basic and Cloze cards."""
     deck = genanki.Deck(random.randrange(1 << 30, 1 << 31), deck_name)
+    
+    # 1. Analyze cards to determine model requirements
+    num_basic, num_cloze = analyze_field_counts(cards)
+    
+    basic_model = create_basic_model(num_basic)
+    cloze_model = create_cloze_model(num_cloze)
 
     for line in cards:
         # ignore comments
@@ -78,27 +135,42 @@ def create_deck(deck_name, cards):
             # Cloze Card
             # If no GUID provided, generate one based on content
             if not guid:
-                guid = genanki.guid_for(line, CLOZE_MODEL_ID)
+                guid = genanki.guid_for(line, cloze_model.model_id)
             
+            fields = line.split(" :: ")
+            fields = [f.strip() for f in fields]
+            
+            # Pad fields
+            while len(fields) < num_cloze:
+                fields.append("")
+                
             deck.add_note(genanki.Note(
-                model=CLOZE_MODEL,
-                fields=[line, ""],
+                model=cloze_model,
+                fields=fields,
                 guid=guid
             ))
             
         elif "::" in line:
             # Basic Card
-            front, back = line.split("::", 1)
-            front = front.strip()
-            back = back.strip()
+            # Basic/Generic Card
+            fields = line.split(" :: ")
+            # Fallback for Basic cards with no spaces around :: if strict split fails to find multiple fields
+            if len(fields) == 1 and "::" in line:
+                 fields = line.split("::")
+
+            fields = [f.strip() for f in fields]
+            
+            # Pad fields
+            while len(fields) < num_basic:
+                fields.append("")
             
             # If no GUID provided, generate one based on Front field
             if not guid:
-                guid = genanki.guid_for(front, BASIC_MODEL_ID)
+                guid = genanki.guid_for(fields[0], basic_model.model_id)
                 
             deck.add_note(genanki.Note(
-                model=BASIC_MODEL,
-                fields=[front, back],
+                model=basic_model,
+                fields=fields,
                 guid=guid
             ))
         else:
