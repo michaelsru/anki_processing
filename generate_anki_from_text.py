@@ -2,10 +2,38 @@
 
 import genanki
 import random
+import re
 import sys
 import os
 from datetime import datetime
 from verify_guids import verify
+
+# Matches: [DeckName] [GUID] content  (GUID may contain ] so use non-greedy .+?)
+_DECK_GUID_RE = re.compile(r'^\[([^\]]+)\]\s+\[(.+?)\]\s+(.*)')
+
+# Matches: [GUID] remainder  (used inside create_deck after deck prefix is stripped)
+_GUID_RE = re.compile(r'^\[(.+?)\]\s+(.*)')
+
+def parse_deck_prefix(line):
+    """Strip optional [DeckName] prefix from a line.
+    Returns (deck_name_or_None, remaining_line_with_guid_intact).
+    """
+    m = _DECK_GUID_RE.match(line)
+    if m:
+        deck_name, guid, content = m.group(1), m.group(2), m.group(3)
+        return deck_name, f"[{guid}] {content}"
+    
+    # Fallback: single bracket [DeckName] without a GUID
+    m2 = re.match(r'^\[([^\]]+)\]\s+(.*)', line)
+    if m2:
+        val = m2.group(1)
+        # Heuristic to distinguish DeckName from legacy GUID:
+        # Deck names usually contain '::', spaces, or are plain words/alphanumeric.
+        # GUIDs are either all digits (genanki) or random base91 with symbols.
+        if '::' in val or ' ' in val or val.replace('_', '').replace('-', '').isalnum():
+            return val, m2.group(2)
+
+    return None, line
 
 # Define Models Globally
 SHARED_CSS = """
@@ -27,154 +55,129 @@ SHARED_CSS = """
 }
 """
 
-def create_basic_model(num_fields):
+def create_basic_model(num_fields, model_id=None):
     """Creates a Basic model with num_fields."""
+    if model_id is None:
+        model_id = 1607392319 + num_fields
     fields = [{'name': f'Field {i+1}'} for i in range(num_fields)]
-    
-    # Build Back template: Field 2 <br> Field 3 ...
+
     back_fmt = '{{FrontSide}}<hr><div class="answer">'
     for i in range(1, num_fields):
         back_fmt += f'{{{{Field {i+1}}}}}<br>'
     back_fmt += '</div>'
-    
+
     return genanki.Model(
-        model_id=1607392319 + num_fields, # Ensure unique ID per field count
+        model_id=model_id,
         name=f'Basic Model ({num_fields} fields)',
         fields=fields,
-        templates=[{
-            'name': 'Card 1',
-            'qfmt': '{{Field 1}}',
-            'afmt': back_fmt,
-        }],
+        templates=[{'name': 'Card 1', 'qfmt': '{{Field 1}}', 'afmt': back_fmt}],
         css=SHARED_CSS
     )
 
-def create_cloze_model(num_fields):
+def create_cloze_model(num_fields, model_id=None):
     """Creates a Cloze model with num_fields."""
-    # Ensure at least 2 fields (Text, Extra)
+    if model_id is None:
+        model_id = 9988776655 + num_fields
     num_fields = max(2, num_fields)
-    
+
     fields = [{'name': 'Text'}, {'name': 'Extra'}]
     for i in range(2, num_fields):
         fields.append({'name': f'Field {i+1}'})
-        
-    # Build Back template: Extra <br> Field 3 ...
+
     back_fmt = '{{cloze:Text}}<br><br>{{Extra}}'
     for i in range(2, num_fields):
         back_fmt += f'<br>{{{{Field {i+1}}}}}'
-        
+
     return genanki.Model(
-        model_id=9988776655 + num_fields,
+        model_id=model_id,
         name=f'Cloze Model ({num_fields} fields)',
         fields=fields,
-        templates=[{
-            'name': 'Cloze Card',
-            'qfmt': '{{cloze:Text}}',
-            'afmt': back_fmt,
-        }],
+        templates=[{'name': 'Cloze Card', 'qfmt': '{{cloze:Text}}', 'afmt': back_fmt}],
         css=SHARED_CSS,
         model_type=genanki.Model.CLOZE
     )
 
-def analyze_field_counts(cards):
-    """Scans all cards to find max field counts for Basic and Cloze types."""
-    max_basic = 2
-    max_cloze = 2
-    
+def create_deck(deck_name, cards):
+    """Creates a single deck containing both Basic and Cloze cards.
+    Preserves original model IDs from [mid:ID] tags when present.
+    """
+    deck = genanki.Deck(random.randrange(1 << 30, 1 << 31), deck_name)
+
+    # --- Pass 1: parse every line, collect per-mid field counts ---
+    # mid_meta: {mid: {'is_cloze': bool, 'max_fields': int}}
+    parsed = []   # list of (guid, mid, is_cloze, fields)
+    mid_meta = {}
+
     for line in cards:
         if line.strip().startswith('#') or not line.strip():
             continue
-            
         line = line.strip()
-        if line.startswith('[') and '] ' in line:
-            _, _, line = line.partition('] ')
-            line = line.strip()
-            
-        fields = line.split(" :: ")
-        # Fallback split check
-        if len(fields) == 1 and "::" in line and not "{{c" in line:
-             fields = line.split("::")
-             
-        count = len(fields)
-        
-        if '{{c' in line:
-            max_cloze = max(max_cloze, count)
-        else:
-            max_basic = max(max_basic, count)
-            
-    return max_basic, max_cloze
 
-def create_deck(deck_name, cards):
-    """Creates a single deck containing both Basic and Cloze cards."""
-    deck = genanki.Deck(random.randrange(1 << 30, 1 << 31), deck_name)
-    
-    # 1. Analyze cards to determine model requirements
-    num_basic, num_cloze = analyze_field_counts(cards)
-    
-    basic_model = create_basic_model(num_basic)
-    cloze_model = create_cloze_model(num_cloze)
+        # Extract [GUID] — use non-greedy regex so ] inside GUIDs doesn't confuse the match
+        guid = None
+        m = _GUID_RE.match(line)
+        if m:
+            guid = m.group(1)
+            line = m.group(2).strip()
 
-    for line in cards:
-        # ignore comments
-        if line.strip().startswith('#'):
-            continue
-        
-        line = line.strip()
+        # Extract optional [mid:ID:COUNT]  — COUNT is the model's declared field count
+        mid = None
+        field_count = None
+        if line.startswith('[mid:') and ']' in line:
+            end = line.index(']')
+            parts = line[5:end].split(':', 1)
+            try:
+                mid = int(parts[0])
+                if len(parts) > 1:
+                    field_count = int(parts[1])
+            except ValueError:
+                pass
+            line = line[end + 1:].strip()
+
         if not line:
             continue
 
-        # Check for [GUID] at the start
-        guid = None
-        if line.startswith('[') and '] ' in line:
-            part1, sep, part2 = line.partition('] ')
-            guid = part1[1:]
-            line = part2.strip()
-
-        # Determine Card Type
-        if '{{c' in line:
-            # Cloze Card
-            # If no GUID provided, generate one based on content
-            if not guid:
-                guid = genanki.guid_for(line, cloze_model.model_id)
-            
-            fields = line.split(" :: ")
-            fields = [f.strip() for f in fields]
-            
-            # Pad fields
-            while len(fields) < num_cloze:
-                fields.append("")
-                
-            deck.add_note(genanki.Note(
-                model=cloze_model,
-                fields=fields,
-                guid=guid
-            ))
-            
-        elif "::" in line:
-            # Basic Card
-            # Basic/Generic Card
-            fields = line.split(" :: ")
-            # Fallback for Basic cards with no spaces around :: if strict split fails to find multiple fields
-            if len(fields) == 1 and "::" in line:
-                 fields = line.split("::")
-
-            fields = [f.strip() for f in fields]
-            
-            # Pad fields
-            while len(fields) < num_basic:
-                fields.append("")
-            
-            # If no GUID provided, generate one based on Front field
-            if not guid:
-                guid = genanki.guid_for(fields[0], basic_model.model_id)
-                
-            deck.add_note(genanki.Note(
-                model=basic_model,
-                fields=fields,
-                guid=guid
-            ))
+        is_cloze = '{{c' in line
+        if is_cloze or '::' in line:
+            fields = [f.strip() for f in line.split(' :: ')]
+            # Fallback bare split only for basic cards — never split inside {{c1::text}}
+            if not is_cloze and len(fields) == 1 and '::' in line:
+                fields = [f.strip() for f in line.split('::')]
         else:
             print(f"⚠️ Skipping invalid line: {line}")
+            continue
+
+        key = (mid, is_cloze)
+        # field_count from tag is authoritative; fall back to observed field count
+        fc = field_count or len(fields)
+        if key not in mid_meta:
+            mid_meta[key] = {'is_cloze': is_cloze, 'max_fields': fc}
+        else:
+            mid_meta[key]['max_fields'] = max(mid_meta[key]['max_fields'], fc)
+
+        parsed.append((guid, mid, is_cloze, fields))
+
+    # --- Build one model per (mid, is_cloze) pair ---
+    models = {}
+    for (mid, is_cloze), meta in mid_meta.items():
+        if is_cloze:
+            models[(mid, is_cloze)] = create_cloze_model(meta['max_fields'], model_id=mid)
+        else:
+            models[(mid, is_cloze)] = create_basic_model(meta['max_fields'], model_id=mid)
+
+    # --- Pass 2: create notes ---
+    for guid, mid, is_cloze, fields in parsed:
+        key = (mid, is_cloze)
+        model = models[key]
+        max_fields = mid_meta[key]['max_fields']
+
+        while len(fields) < max_fields:
+            fields.append('')
+
+        if not guid:
+            guid = genanki.guid_for(fields[0], model.model_id)
+
+        deck.add_note(genanki.Note(model=model, fields=fields, guid=guid))
 
     return deck
 
@@ -245,31 +248,44 @@ def main():
     """Main entry point that orchestrates the deck generation process."""
     input_path = parse_arguments()
     lines = read_input_file(input_path)
-    deck_name = get_deck_name(input_path)
-    
-    deck = create_deck(deck_name, lines)
-    
-    if len(deck.notes) == 0:
+    fallback_deck = get_deck_name(input_path)
+
+    # Group lines by deck name parsed from [DeckName] prefix.
+    # Lines without a prefix fall back to the filename-derived deck name.
+    deck_lines: dict[str, list[str]] = {}
+    for line in lines:
+        if line.startswith('#'):
+            continue
+        deck_name, stripped = parse_deck_prefix(line)
+        key = deck_name or fallback_deck
+        deck_lines.setdefault(key, []).append(stripped)
+
+    if not deck_lines:
         print("❌ No valid cards found.")
         sys.exit(1)
-        
-    output_dir = "generated_decks"
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-        
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    output_filename = os.path.join(output_dir, f"{deck_name}_{date_str}.apkg")
-    
-    export_deck(deck, output_filename)
 
-    # Verify GUIDs
-    print("\n--- Verifying GUIDs ---")
-    try:
-        verify(input_path, output_filename)
-    except ImportError:
-        print("Warning: verify_guids module not found. Skipping verification.")
-    except Exception as e:
-        print(f"Warning: Verification failed: {e}")
+    output_dir = "generated_decks"
+    os.makedirs(output_dir, exist_ok=True)
+    archive_all_decks(output_dir)
+
+    decks = []
+    for deck_name, card_lines in deck_lines.items():
+        deck = create_deck(deck_name, card_lines)
+        if deck.notes:
+            decks.append(deck)
+            print(f"  {deck_name}: {len(deck.notes)} cards")
+
+    if not decks:
+        print("❌ No valid cards found.")
+        sys.exit(1)
+
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    safe_name = re.sub(r'[^\w]', '_', fallback_deck)
+    output_filename = os.path.join(output_dir, f"{safe_name}_{date_str}.apkg")
+
+    genanki.Package(decks).write_to_file(output_filename)
+    total = sum(len(d.notes) for d in decks)
+    print(f"✅ Exported {total} cards across {len(decks)} deck(s) → {output_filename}")
 
 if __name__ == '__main__':
     main()
