@@ -148,8 +148,11 @@ def create_deck(deck_name, cards):
             continue
 
         key = (mid, is_cloze)
-        # field_count from tag is authoritative; fall back to observed field count
+        # field_count from tag is authoritative; fall back to observed field count.
+        # Cloze models always have at least 2 fields (Text + Extra) — mirror create_cloze_model's max(2, n).
         fc = field_count or len(fields)
+        if is_cloze:
+            fc = max(2, fc)
         if key not in mid_meta:
             mid_meta[key] = {'is_cloze': is_cloze, 'max_fields': fc}
         else:
