@@ -9,18 +9,29 @@ This project contains a suite of tools for generating, managing, and inspecting 
 - **Migration Tools**: Helpers to convert existing decks or HTML dumps into the supported text format.
 
 ## File Format
-The source text file (e.g., `cards.txt`) uses a simple format:
+The source text file (e.g., `cards.txt`) uses a line-per-card format:
 ```text
-[<GUID>] Question :: Answer
+[DeckName] [GUID] [mid:MODEL_ID:FIELDCOUNT] Field1 :: Field2
 ```
-- **GUID**: A unique identifier (e.g., `[15938472]`) that ensures Anki recognizes the card as the same note even if you edit the text.
-- **Separator**: `::` separates the Front (Question) and Back (Answer).
+- **DeckName**: The target deck. `::` nests decks (`Embedded::Protocols::I2C`).
+- **GUID**: A unique identifier that ensures Anki recognizes the card as the same
+  note even if you edit the text. Optional, but see the warning below.
+- **mid tag**: Optional. Emitted by `dump_apkg.py` to remember the source notetype.
+- **Separator**: ` :: ` (spaced) separates fields.
 
 **Example:**
 ```text
-[12345678] What is the time complexity of Binary Search? :: O(log n)
-[87654321] What data structure uses LIFO? :: Stack
+[Algorithms] [12345678] What is the time complexity of Binary Search? :: O(log n)
+[Algorithms] [87654321] What data structure uses LIFO? :: Stack
 ```
+
+⚠️ **Always write the `[DeckName]` prefix.** A bare `[12345678] Question :: Answer`
+line is parsed as a *deck named 12345678* — the GUID is discarded. (Earlier
+versions of this README documented that GUID-only form; deck-prefix support
+superseded it.)
+
+**`template_cards.txt` in the repo root is the full format reference** and a
+runnable example — every rule, every trap, with live cards you can generate as-is.
 
 ## Scripts
 
@@ -49,8 +60,47 @@ Verifies that the GUIDs in a generated `.apkg` match the source text file.
 **Options**:
 - `--verbose` or `-v`: Print the content of missing or unexpected cards to help identify discrepancies.
 
+⚠️ **Known bug**: `verify` reads the first bracket group as the GUID, so on
+deck-prefixed files it compares deck names against real GUIDs and reports every
+card as mismatched. This also affects the verification step `dump_apkg.py` runs
+automatically. Ignore that section until it's fixed.
+
+### 4. `check_overlap.py`
+Flags candidate cards that duplicate cards already in your collection, so you
+don't study the same fact twice.
+```bash
+./venv/bin/python check_overlap.py candidates/i2c.txt --corpus anki_review_output/cards.txt
+```
+Scores each candidate's **front** and **back** separately against the corpus
+(shared back with a different front is usually an intentional reverse card, not a
+duplicate), also dedups candidates against each other, and hard-errors on GUID
+collisions that would silently overwrite existing cards.
+
+**Options**: `--threshold` (default 0.45, lower = more flagged), `--json`,
+`--annotate` (notes above flagged cards, cards left live), `--strict` (comment
+flagged cards out), `--clean` (strip annotations), `--allow-existing-guids`.
+
+Deliberately loose: it's the recall stage, you're the precision stage.
+
 ## Workflow
-1.  **Edit**: Add or modify cards in `cards.txt`.
-2.  **Generate**: Run `generate_anki_from_text.py`.
-3.  **Import**: Double-click the generated `.apkg` to import into Anki.
-4.  **Study**: Anki will update existing cards (preserving scheduling) and add new ones.
+1.  **Export the FULL collection** from Anki (File → Export → All Decks) and run
+    `dump_apkg.py` on it. `dump_apkg.py` wipes its output directory each run, so
+    `anki_review_output/cards.txt` only ever holds the last deck you dumped —
+    dedup against a partial corpus looks like it's working when it isn't.
+2.  **Distill** new material into `candidates/<topic>.txt` (see `template_cards.txt`).
+3.  **Check**: Run `check_overlap.py` and adjudicate anything flagged.
+4.  **Generate**: Append approved cards to `cards.txt`, run `generate_anki_from_text.py`.
+5.  **Import**: Double-click the generated `.apkg` to import into Anki.
+6.  **Study**: Anki will update existing cards (preserving scheduling) and add new ones.
+
+Steps 2–3 are automated by the `anki-cards` skill in `.claude/skills/`.
+
+## Known limitations
+- **Media does not round-trip.** `dump_apkg.py` extracts images to
+  `anki_review_output/media/`, but `generate_anki_from_text.py` packages no media
+  files. `<img>` tags survive as text; the images do not.
+- **Anki tags are not carried.** Nothing in the pipeline reads or writes
+  `notes.tags`, so tags are absent from dumps and never set on generated notes.
+- **Notetypes are flattened.** Preserving a `[mid:...]` tag preserves the model
+  *id*, not the model — field names and templates are regenerated as generic
+  `Field 1..N`. Test round-trips on a scratch Anki profile first.

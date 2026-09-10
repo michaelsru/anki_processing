@@ -1,0 +1,17 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Generated / derived artifacts — reproducible from the scripts
+generated_decks/
+anki_review_output/
+*.apkg
+
+# Employer-internal raw notes the cards were distilled from.
+# Safe to un-ignore ONLY if this repo is private.
+source_material/
+
+# Distilled cards: generalized, but personal study content.
+# Un-ignore if you want your decks versioned here.
+candidates/

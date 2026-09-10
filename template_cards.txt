@@ -1,0 +1,180 @@
+# =============================================================================
+# ANKI CARD TEMPLATE / FORMAT REFERENCE
+# =============================================================================
+# This file is a working example AND the format spec for generate_anki_from_text.py.
+# It is runnable as-is:
+#
+#     python generate_anki_from_text.py template_cards.txt
+#
+# Copy it, replace the example lines, and generate. Every rule below was derived
+# from the parser in generate_anki_from_text.py (parse_deck_prefix + create_deck)
+# and the emitter in dump_apkg.py (_generate_text).
+#
+# -----------------------------------------------------------------------------
+# LINE FORMAT
+# -----------------------------------------------------------------------------
+#
+#   [DeckName] [GUID] [mid:MODEL_ID:FIELDCOUNT] Field1 :: Field2 :: Field3
+#   \________/ \____/ \______________________/ \___________________________/
+#    required   opt.         optional                  the card content
+#    (see #1)
+#
+# - One card per line. No multi-line cards; use <br> for line breaks.
+# - Blank lines and lines starting with '#' are ignored.
+# - Fields are separated by ' :: ' (space-colon-colon-space).
+# - This is exactly the format dump_apkg.py writes to anki_review_output/cards.txt,
+#   so an exported deck can be edited here and fed straight back in.
+#
+# -----------------------------------------------------------------------------
+# RULE 1 — ALWAYS WRITE THE [DeckName] PREFIX
+# -----------------------------------------------------------------------------
+# The parser distinguishes a deck name from a GUID by a heuristic. An
+# alphanumeric first bracket is treated as a DECK NAME, so this line:
+#
+#     [15938472] Front :: Back           <-- WRONG
+#
+# creates a deck literally named "15938472" and throws the GUID away.
+# (Note: README.md still documents this old GUID-only form. It is stale — the
+# deck-prefix support added later took that syntax over. Use the prefix.)
+# Always write both:
+#
+#     [My Deck] [15938472] Front :: Back  <-- RIGHT
+#
+# Lines with no bracket at all are fine — they fall back to the deck name
+# derived from this file's name (template_cards).
+#
+# Deck names:
+#   - '::' nests decks in Anki:  Embedded::RTOS::Scheduling
+#   - ']' is forbidden inside a deck name.
+#   - spaces are fine.
+#
+# -----------------------------------------------------------------------------
+# RULE 2 — GUIDs PRESERVE YOUR SCHEDULING
+# -----------------------------------------------------------------------------
+# The GUID is what Anki matches on re-import. Same GUID = "update this note,
+# keep its review history". No GUID = one is derived from the FIRST FIELD's text
+# (genanki.guid_for), so editing the question text of a GUID-less card creates a
+# brand-new card and loses its scheduling.
+#
+#   - New cards you are writing by hand: omit the GUID, or invent a unique one.
+#   - Cards exported by dump_apkg.py: NEVER edit or drop the GUID.
+#
+# GUIDs may contain punctuation (genanki's base91 ids like `Ff)Xn2` are fine).
+#
+# -----------------------------------------------------------------------------
+# RULE 3 — THE [mid:ID:COUNT] TAG
+# -----------------------------------------------------------------------------
+# dump_apkg.py emits this to remember which notetype a note came from and how
+# many fields that notetype declares. Two hard rules:
+#
+#   (a) It only works AFTER a [GUID]. A bare `[mid:...]` with no GUID in front
+#       of it is swallowed as the GUID and silently ignored.
+#
+#   (b) COUNT OVERRIDES the number of fields you actually wrote. If you add a
+#       third field to a line tagged [mid:X:2], you get a 3-field note against a
+#       2-field model — a broken/rejected note. IF YOU ADD A FIELD, BUMP COUNT
+#       ON THAT LINE. Bumping it on one line is enough: it raises the field
+#       count for every note sharing that model id and pads the rest with empty
+#       fields.
+#
+# Omit the tag entirely for hand-written cards. The generator then groups all
+# untagged basic cards in a deck into one model sized to the widest line, and
+# gives it the id 1607392319+FIELDCOUNT (or 9988776655+FIELDCOUNT for cloze).
+# Don't hand-write a mid tag using one of those ids or you will collide with a
+# generated model.
+#
+# CAVEAT: preserving the mid preserves the model *id*, not the model. Field
+# names and card templates are regenerated as generic 'Field 1'..'Field N' with
+# a stock front/back template. Round-tripping a deck that uses a real Anki
+# notetype will flatten it. Test on a scratch Anki profile with one small deck
+# and confirm the notetype and scheduling survived before doing this to a deck
+# you care about.
+#
+# -----------------------------------------------------------------------------
+# RULE 4 — BASIC vs CLOZE
+# -----------------------------------------------------------------------------
+# A line becomes a CLOZE card if the substring '{{c' appears ANYWHERE in it.
+# There is no other switch. Consequences:
+#
+#   - A Basic card that merely quotes '{{c1::...}}' as example text will be
+#     turned into a cloze card. Write it as {{ c1:: with a space to avoid this.
+#   - Inside a cloze deletion, use '::' with NO surrounding spaces. A spaced
+#     ' :: ' anywhere in the line is a field separator and will split the
+#     deletion in half.
+#
+# Cloze notes always have at least 2 fields: Text and Extra. Field 2 is the
+# Extra (shown on the answer side); leave it off and it is padded to empty.
+#
+# -----------------------------------------------------------------------------
+# RULE 5 — CONTENT
+# -----------------------------------------------------------------------------
+#   - HTML is allowed and encouraged: <br>, <b>, <code>, <ul><li>.
+#   - Do NOT use a bare ' :: ' inside field text — it splits the field.
+#     '::' without spaces (C++ scope, deck paths) is safe on Basic cards only
+#     if the line has at least one spaced ' :: ' separator; otherwise the
+#     parser falls back to splitting on bare '::'. When in doubt, write &#58;&#58;
+#   - MEDIA DOES NOT ROUND-TRIP. dump_apkg.py extracts images to
+#     anki_review_output/media/, but generate_anki_from_text.py packages no
+#     media files. <img> tags survive as text; the images do not. Re-attach
+#     media in Anki, or add media_files= to the genanki.Package call.
+#
+# -----------------------------------------------------------------------------
+# OUTPUT / WORKFLOW
+# -----------------------------------------------------------------------------
+#   Generate:  python generate_anki_from_text.py <thisfile>.txt
+#              -> generated_decks/<thisfile>_YYYY-MM-DD.apkg
+#              Existing .apkg files in generated_decks/ are first moved to
+#              generated_decks/archive/.
+#              The file's own name is also the fallback deck for un-prefixed lines.
+#
+#   Inspect:   python dump_apkg.py generated_decks/<name>.apkg
+#              -> anki_review_output/index.html   (visual preview)
+#              -> anki_review_output/cards.txt    (this format — edit and re-generate)
+#
+#   NOTE: dump_apkg.py's "--- Verifying GUIDs ---" step will report every card as
+#   mismatched on any deck-prefixed file. verify_guids.py reads the FIRST bracket
+#   as the GUID and so compares deck names against real GUIDs. It is a one-line
+#   bug in verify_guids.verify(), not a problem with your deck. Ignore that
+#   section, or fix it to skip the deck prefix.
+#
+# =============================================================================
+# EXAMPLES — all of the lines below are live and will generate real cards.
+# Delete them and write your own.
+# =============================================================================
+
+# --- Basic two-field cards -------------------------------------------------
+# The everyday case: deck, question, answer. No GUID, so the id is derived from
+# the question text.
+[Template Demo::Basics] What is the time complexity of binary search? :: O(log n)
+[Template Demo::Basics] Which data structure is LIFO? :: A stack
+[Template Demo::Basics] What does <code>volatile</code> tell a C compiler? :: Do not cache this variable in a register &mdash; re-read it from memory on every access.
+
+# --- Basic card with an explicit GUID --------------------------------------
+# Pin the id so you can rewrite the question later without losing scheduling.
+[Template Demo::Basics] [tmpl-0001] What is the default stack size of a POSIX thread? :: Typically 8&nbsp;MB on Linux (see <code>ulimit -s</code>).
+
+# --- Three-field card ------------------------------------------------------
+# Every extra field is stacked on the answer side. All untagged basic cards in
+# a deck share one model sized to the widest line, so the two-field cards above
+# are padded to three fields automatically.
+[Template Demo::Basics] [tmpl-0002] What is priority inversion? :: A low-priority task holds a lock a high-priority task needs. :: Fixed by priority inheritance or a priority ceiling.
+
+# --- HTML formatting -------------------------------------------------------
+[Template Demo::Formatting] [tmpl-0003] List the three states of a task in a typical RTOS. :: <ul><li>Running</li><li>Ready</li><li>Blocked</li></ul>
+[Template Demo::Formatting] [tmpl-0004] Write the signature of <code>sem_wait</code>. :: <code>int sem_wait(sem_t *sem);</code><br>Blocks until the count is &gt; 0, then decrements it.
+
+# --- Cloze cards -----------------------------------------------------------
+# Note: '::' inside {{c1::...}} has NO spaces around it. The ' :: ' before
+# "Extra" IS spaced, and separates the Text field from the Extra field.
+[Template Demo::Cloze] [tmpl-0005] A mutex provides {{c1::mutual exclusion}}, while a semaphore provides {{c2::counted access to N resources}}.
+[Template Demo::Cloze] [tmpl-0006] SPI is {{c1::full-duplex}} and I2C is {{c2::half-duplex}}. :: SPI needs a separate chip-select line per device.
+
+# --- Round-tripped card, with the model tag --------------------------------
+# This is what a line coming out of dump_apkg.py looks like. Keep the GUID and
+# the mid tag byte-for-byte; edit only the text after them. Remember rule 3(b):
+# adding a ' :: ' field here means bumping the ':2' to ':3'.
+[Template Demo::Round Trip] [tmpl-0007] [mid:1751847093121:2] What does the <code>mid</code> tag preserve? :: The notetype id and its declared field count.
+
+# --- No deck prefix --------------------------------------------------------
+# Falls back to a deck named after this file (template_cards).
+This card has no deck prefix. :: It lands in the deck named after the source file.
