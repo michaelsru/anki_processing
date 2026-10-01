@@ -1,6 +1,6 @@
 ---
 name: anki-cards
-description: Turn raw notes, prose, datasheet excerpts, or a list of topics into Anki cards that don't duplicate the existing collection. Use whenever the user has source material to convert into cards, wants to add cards on a topic, or asks to check new cards against what they already have.
+description: Turn raw notes, prose, datasheet excerpts, a list of topics, or a teaching session note from the learning system into Anki cards that don't duplicate the existing collection. Use whenever the user has source material to convert into cards, wants to add cards on a topic, wants cards from a learning session, or asks to check new cards against what they already have.
 ---
 
 # Authoring Anki cards from raw material
@@ -8,6 +8,10 @@ description: Turn raw notes, prose, datasheet excerpts, or a list of topics into
 The source material is usually **not** distilled into discrete points. Distilling
 it is your job. Deduplicating it against thousands of existing cards is
 `check_overlap.py`'s job — don't try to eyeball the corpus yourself.
+
+**Unless the source is a teaching session note,** in which case the selection has
+already been made by the agent that taught the session, and re-doing it is wrong.
+See *Step 3b*.
 
 ## Step 1 — Confirm the corpus is complete
 
@@ -214,6 +218,77 @@ scope-labelling problem — it fails the generalization rule and is not a card.
 - Media does not round-trip — `generate_anki_from_text.py` packages no media
   files. Don't emit `<img>` tags and expect images to appear.
 
+## Step 3b — When the source is a teaching session note
+
+Sessions from the learning system are not raw material. They already carry the
+selection, made by the teacher while it had the user's typed quiz answers in
+front of it.
+
+Recognise one by shape, not by path: a markdown file named `sessions/<topic>.md`,
+one dated `## YYYY-MM-DD` section per session, a node entry per `### Node`, and
+an `Open` section at the end. It lives under whatever project the teaching ran
+in, which is usually **not** this repo, so take the path from the user rather
+than guessing at one. Each node entry that earned cards holds a block like:
+
+```markdown
+**Cards:**
+- `[ ]` Trace decoded against a mismatched binary comes out plausible and wrong, not as an error. (thin pass: he had "the binary must match" without the silent part)
+```
+
+**Author exactly those facts and nothing else.** The note is full of material
+that deliberately did not earn a card: derivations he can regenerate from the
+nodes underneath them, figures that exist to motivate a step, facts he already
+held before the session started, and nodes that were never taught. Carding those
+is the failure mode this branch exists to prevent, and it is an easy one to fall
+into, because in context every fact in a well-written session note looks
+card-worthy. One session note yielding thirty cards means you distilled it
+instead of reading its selection.
+
+Everything else in this skill still applies to the facts you were handed: cloze
+form, one recallable idea each, scope labels, generalization, explicit GUIDs, the
+overlap check. Splitting one selected fact into two cards is fine when the
+atomize rule demands it. Adding a fact the teacher didn't select is not.
+
+A few more things:
+
+- **`[ ]` means unauthored, a GUID means done.** Write the GUID you allocate back
+  into the note's bracket in the same run that generates the card, so the next
+  run over that note skips it. A note accumulates a new dated section per session
+  and you will read it again. The teacher now triggers a run at every pause in a
+  topic, so a note whose earlier brackets are already filled is the normal case.
+  Leave those facts alone.
+- **The note holds the GUID counter, not the corpus.** Step 3 says to allocate
+  `[topic-NNNN]` by scanning the corpus for that prefix, which is not enough for
+  a session note. The dump can be weeks old and hold none of the topic's cards,
+  and a scan that restarts at `0001` generates over cards he already has review
+  history on. Take the highest number you can find anywhere: the note's filled
+  brackets, the topic's candidate files, and the corpus.
+- **A reason that names an existing GUID is a refinement.** The teacher writes
+  `(refines [topic-NNNN]: ...)` when a later session sharpened a fact that is
+  already carded. Merge it into that GUID's line as in Step 5, keep the GUID, and
+  author no second card. Write that same GUID back into the refinement's bracket,
+  so the next run reads the selection as done.
+- **Write a fresh candidates file per run, never append.** A note gets authored
+  again at every pause, so put only this run's cards in the next free
+  `candidates/<topic>-<n>.txt`. A file that still holds GUIDs you generated last
+  time collides with them on every later run, which forces
+  `--allow-existing-guids` from then on, and that flag is the only thing standing
+  between a bad counter and an overwritten card. The refinement above is the one
+  case where an existing card's line belongs in the file, because Step 5 has to
+  edit it in place.
+- **A triggered run does not stop at Step 1.** The teacher starts these at a
+  pause in a lesson, so there is nobody free to confirm that the dump covers the
+  whole collection. Go ahead with whatever `anki_review_output/cards.txt` holds,
+  and report its date and whether it held any cards for this topic. Refreshing it
+  is the user's call, made between sessions rather than during one.
+- **Check the Open section before you start.** If it says a node is half-answered
+  or was never reached, nothing from it should appear in your candidates, however
+  complete the note's prose on it looks.
+
+If a selected fact is one you cannot author well (it needs a figure, or it only
+makes sense against a node that isn't taught yet), say so in your report and
+leave its bracket empty rather than writing a weak card.
+
 ## Step 4 — Run the overlap check
 
 ```bash
@@ -229,15 +304,27 @@ The threshold defaults to 0.5 and is deliberately loose. **The script is the
 recall stage; you are the precision stage.** Expect false positives — that is
 the design, not a bug.
 
-**Include pending candidate files in the corpus.** `--corpus` defaults to the
-dump of what is already in Anki, which does not include topics distilled earlier
-in the same session and not yet imported. Concatenate them first, or you will
-happily generate the same APN card twice:
+**Include the other pending candidate files in the corpus, and leave out the one
+you are checking.** `--corpus` defaults to the dump of what is already in Anki,
+which does not include topics distilled earlier in the same session and not yet
+imported. Concatenate them first, or you will happily generate the same APN card
+twice. Exclude the file under check, though. `find_guid_collisions` has no
+self-exclusion, so a file holding its own GUIDs exits 2 on every one of them
+before the overlap pass runs at all:
 
 ```bash
-cat anki_review_output/cards.txt candidates/*.txt > /tmp/corpus.txt
-python check_overlap.py candidates/<topic>.txt --corpus /tmp/corpus.txt
+CAND=candidates/<the file you are checking>.txt
+cat anki_review_output/cards.txt $(ls candidates/*.txt | grep -vx "$CAND") > /tmp/corpus.txt
+python check_overlap.py "$CAND" --corpus /tmp/corpus.txt
 ```
+
+The exclusion has to name the file under check, not the topic. A topic authored
+over several pauses has several candidate files, and the others belong in the
+corpus.
+
+Do not answer a GUID collision by reaching for `--allow-existing-guids` to get
+past it. Pass it only when the colliding line is a card you are deliberately
+merging into per Step 5.
 
 **Each card is scored as one bag of words.** Front and back are pooled, with
 cloze deletions unwrapped, so a cloze candidate is compared against the whole of
