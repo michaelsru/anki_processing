@@ -7,7 +7,6 @@ import subprocess
 import tempfile
 import unittest
 import zipfile
-from unittest.mock import patch, mock_open
 import sys
 import os
 
@@ -18,7 +17,6 @@ sys.path.append(REPO)
 import genanki
 
 import generate_anki_from_text
-import dump_apkg
 import verify_guids
 
 
@@ -211,64 +209,6 @@ class TestGenerateAnkiFromText(unittest.TestCase):
         self.assertTrue(os.path.exists(old))
         self.assertFalse(os.path.exists(os.path.join(out, 'archive')))
 
-
-class TestDumpApkg(unittest.TestCase):
-    @patch('dump_apkg.AnkiDeckUnpacker')
-    @patch('dump_apkg.verify') # Mock verify to do nothing
-    @patch('builtins.print') # Suppress print
-    def test_generate_text_output(self, mock_print, mock_verify, mock_unpacker_cls):
-        """Test correctly formatting text output from notes."""
-        mock_unpacker = mock_unpacker_cls.return_value
-        # Mock notes: [(fields_string, guid), ...]
-        # Fields are separated by \x1f
-        mock_unpacker.get_notes.return_value = [
-            ("Question\x1fAnswer", "12345"),
-            ("Front\x1fExtra\x1fBack", "67890") # Complex card
-        ]
-        
-        # Mock opening file
-        m = mock_open()
-        with patch('builtins.open', m):
-            dump_apkg.unpack_and_review("fake.apkg", "output_dir")
-            
-        # Check file write for cards.txt
-        # The script writes multiple files (html and txt). We need to validte the calls.
-        # dump_apkg opens: 
-        # 1. html_path (w)
-        # 2. txt_path (w)
-        
-        # We can iterate through mock calls to open() to find the one for cards.txt
-        # effectively we just check if any write call contained the expected string
-        
-        handle = m()
-        write_calls = handle.write.call_args_list
-        all_written_content = "".join([call[0][0] for call in write_calls])
-        
-        self.assertIn("[12345] Question :: Answer", all_written_content)
-        # For multi-field cards, logic is: all fields joined by ::
-        self.assertIn("[67890] Front :: Extra :: Back", all_written_content)
-
-    @patch('dump_apkg.AnkiDeckUnpacker')
-    @patch('dump_apkg.verify')
-    @patch('builtins.print')
-    def test_generate_html_output(self, mock_print, mock_verify, mock_unpacker_cls):
-        """Test HTML generation handles media paths."""
-        mock_unpacker = mock_unpacker_cls.return_value
-        mock_unpacker.get_notes.return_value = [
-            ('Question <img src="image.jpg">', "111")
-        ]
-        
-        m = mock_open()
-        with patch('builtins.open', m):
-            dump_apkg.unpack_and_review("fake.apkg", "output_dir")
-            
-        handle = m()
-        write_calls = handle.write.call_args_list
-        all_written_content = "".join([call[0][0] for call in write_calls])
-        
-        # Check for media path replacement in HTML
-        self.assertIn('src="media/image.jpg"', all_written_content)
-        self.assertIn('data-guid="111"', all_written_content)
 
 if __name__ == '__main__':
     unittest.main()

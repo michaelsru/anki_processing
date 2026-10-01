@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-import unittest
-import sys
+"""Run every test under tests/. Same as `python -m unittest discover tests`."""
 import os
-
-# Add current directory to path so tests can import scripts
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-# Import tests
-from tests.test_anki_scripts import *
+import sys
+import unittest
 
 if __name__ == '__main__':
-    unittest.main(module='tests.test_anki_scripts')
+    tests_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tests')
+    suite = unittest.defaultTestLoader.discover(tests_dir)
+    result = unittest.TextTestRunner(verbosity=1).run(suite)
+    sys.exit(0 if result.wasSuccessful() else 1)
