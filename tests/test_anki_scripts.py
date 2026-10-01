@@ -1,11 +1,13 @@
+import contextlib
 import glob
+import io
 import json
 import sqlite3
 import subprocess
 import tempfile
 import unittest
 import zipfile
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import patch, mock_open
 import sys
 import os
 
@@ -61,163 +63,77 @@ class TestGeneratorCli(unittest.TestCase):
         self.assertEqual(notes, [('g1', genanki.guid_for('Q', 1), 1, ['Q', 'A'])])
 
 
+def generate_from_lines(lines, tmp, name='cards.txt'):
+    """Write `lines` to <tmp>/<name>, generate into <tmp>/out, return the notes."""
+    src = os.path.join(tmp, name)
+    with open(src, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines) + '\n')
+    with contextlib.redirect_stdout(io.StringIO()):
+        apkg = generate_anki_from_text.generate(src, os.path.join(tmp, 'out'))
+    return notes_in_apkg(apkg)
+
+
+BASIC_2 = generate_anki_from_text.BASIC_MODEL_ID_BASE + 2
+BASIC_3 = generate_anki_from_text.BASIC_MODEL_ID_BASE + 3
+CLOZE_2 = generate_anki_from_text.CLOZE_MODEL_ID_BASE + 2
+
+
 class TestGenerateAnkiFromText(unittest.TestCase):
     def setUp(self):
         self.maxDiff = None
+        self.tmp = tempfile.mkdtemp()
 
-    def test_create_deck_basic_card(self):
-        """Test that a basic card line produces a Basic note with correct fields."""
-        cards = ["Question :: Answer"]
-        
-        # We need to mock genanki to avoid actual deck creation issues and to check calls
-        with patch('generate_anki_from_text.genanki') as mock_genanki:
-            # Setup mock deck
-            mock_deck = MagicMock()
-            mock_deck.notes = []
-            mock_genanki.Deck.return_value = mock_deck
-            
-            # Setup mock Note
-            mock_note = MagicMock()
-            mock_genanki.Note.return_value = mock_note
+    def _notes(self, *lines, **kw):
+        return generate_from_lines(lines, self.tmp, **kw)
 
-            deck = generate_anki_from_text.create_deck("Test Deck", cards)
-            
-            # Check Note creation
-            # Check Note creation
-            mock_genanki.Note.assert_called()
-            call_args = mock_genanki.Note.call_args[1]
-            fields = call_args['fields']
-            model = call_args['model']
-            
-            self.assertEqual(fields, ['Question', 'Answer'])
-            
-            # Verify Model was created with 2 fields
-            # We check if ANY call to genanki.Model had fields of length 2
-            found_model = False
-            for call in mock_genanki.Model.call_args_list:
-                _, kwargs = call
-                if len(kwargs.get('fields', [])) == 2:
-                    found_model = True
-                    break
-            self.assertTrue(found_model, "Create Model with 2 fields not found")
-            
-            mock_deck.add_note.assert_called_with(mock_note)
-            
-    def test_create_deck_3_fields(self):
-        """Test card with 3 fields."""
-        cards = ["Field1 :: Field2 :: Field3"]
-        
-        with patch('generate_anki_from_text.genanki') as mock_genanki:
-            mock_deck = MagicMock()
-            mock_deck.notes = []
-            mock_genanki.Deck.return_value = mock_deck
-            mock_note = MagicMock()
-            mock_genanki.Note.return_value = mock_note
+    def test_basic_card(self):
+        notes = self._notes('[D] Question :: Answer')
+        self.assertEqual(notes, [('D', genanki.guid_for('Question', BASIC_2), BASIC_2,
+                                  ['Question', 'Answer'])])
 
-            deck = generate_anki_from_text.create_deck("Test Deck", cards)
-            
-            mock_genanki.Note.assert_called()
-            call_args = mock_genanki.Note.call_args[1]
-            fields = call_args['fields']
-            model = call_args['model']
-            
-            self.assertEqual(fields, ['Field1', 'Field2', 'Field3'])
-            # Verify dynamic model created with 3 fields
-            found_model = False
-            for call in mock_genanki.Model.call_args_list:
-                _, kwargs = call
-                m_fields = kwargs.get('fields', [])
-                if len(m_fields) == 3:
-                     # Check names
-                     if m_fields[0]['name'] == 'Field 1' and m_fields[2]['name'] == 'Field 3':
-                        found_model = True
-                        break
-            self.assertTrue(found_model, "Create Model with 3 fields not found")
+    def test_untagged_basic_cards_in_a_deck_share_the_widest_model(self):
+        notes = self._notes('[D] [a] F1 :: F2 :: F3', '[D] [b] Q :: A')
+        self.assertEqual(sorted(notes), [('D', 'a', BASIC_3, ['F1', 'F2', 'F3']),
+                                         ('D', 'b', BASIC_3, ['Q', 'A', ''])])
 
-    def test_create_deck_cloze_card(self):
-        """Test that a cloze card line produces a Cloze note."""
-        cards = ["{{c1::Cloze}} deletion"]
-        
-        with patch('generate_anki_from_text.genanki') as mock_genanki:
-            mock_deck = MagicMock()
-            mock_deck.notes = []
-            mock_genanki.Deck.return_value = mock_deck
-            
-            mock_note = MagicMock()
-            mock_genanki.Note.return_value = mock_note
+    def test_cloze_card_gets_extra_field_and_cloze_model(self):
+        notes = self._notes('[D] [c] {{c1::Cloze}} deletion')
+        self.assertEqual(notes, [('D', 'c', CLOZE_2, ['{{c1::Cloze}} deletion', ''])])
+        models = generate_anki_from_text.build_models(
+            generate_anki_from_text.read_cards(os.path.join(self.tmp, 'cards.txt')))
+        self.assertEqual(models[('deck', 'D', True)].model_type, genanki.Model.CLOZE)
 
-            deck = generate_anki_from_text.create_deck("Test Deck", cards)
-            
-            mock_genanki.Note.assert_called()
-            call_args = mock_genanki.Note.call_args[1]
-            fields = call_args['fields']
-            model = call_args['model']
-            
-            self.assertEqual(fields, ['{{c1::Cloze}} deletion', ''])
-            self.assertEqual(fields, ['{{c1::Cloze}} deletion', ''])
-            # Verify Model creation
-            found_model = False
-            for call in mock_genanki.Model.call_args_list:
-                _, kwargs = call
-                if len(kwargs.get('fields', [])) == 2:
-                    found_model = True
-            self.assertTrue(found_model)
+    def test_cloze_with_extra(self):
+        notes = self._notes('[D] [c] {{c1::Cloze}} :: Extra Info')
+        self.assertEqual(notes[0][3], ['{{c1::Cloze}}', 'Extra Info'])
 
-    def test_create_deck_cloze_with_extra(self):
-        """Test cloze card with extra field."""
-        cards = ["{{c1::Cloze}} :: Extra Info"]
-        
-        with patch('generate_anki_from_text.genanki') as mock_genanki:
-            mock_deck = MagicMock()
-            mock_deck.notes = []
-            mock_genanki.Deck.return_value = mock_deck
-            
-            generate_anki_from_text.create_deck("Test Deck", cards)
-            
-            mock_genanki.Note.assert_called()
-            call_args = mock_genanki.Note.call_args[1]
-            fields = call_args['fields']
-            model = call_args['model']
-            
-            self.assertEqual(fields, ['{{c1::Cloze}}', 'Extra Info'])
-            self.assertEqual(fields, ['{{c1::Cloze}}', 'Extra Info'])
-            found_model = False
-            for call in mock_genanki.Model.call_args_list:
-                _, kwargs = call
-                if len(kwargs.get('fields', [])) == 2:
-                    found_model = True
-            self.assertTrue(found_model)
+    def test_explicit_guid_kept_including_brackets(self):
+        notes = self._notes('[D] [1234567890] Question :: Answer',
+                            '[D] [Pr0gsJ]<qW] [mid:1:2] Q :: A')
+        self.assertEqual(sorted(n[1] for n in notes), ['1234567890', 'Pr0gsJ]<qW'])
 
-    def test_create_deck_with_guid(self):
-        """Test parsing of explicit GUID."""
-        guid = "1234567890"
-        cards = [f"[{guid}] Question :: Answer"]
-        
-        with patch('generate_anki_from_text.genanki') as mock_genanki:
-            mock_deck = MagicMock()
-            mock_deck.notes = []
-            mock_genanki.Deck.return_value = mock_deck
-            
-            generate_anki_from_text.create_deck("Test Deck", cards)
-            
-            mock_genanki.Note.assert_called()
-            call_args = mock_genanki.Note.call_args[1]
-            self.assertEqual(str(call_args['guid']), guid)
-            self.assertEqual(call_args['fields'], ['Question', 'Answer'])
+    def test_comments_and_blank_lines_skipped(self):
+        notes = self._notes('# Comment', '', '  ', '[D] Valid :: Card')
+        self.assertEqual([n[3] for n in notes], [['Valid', 'Card']])
 
-    def test_skip_comments_and_empty(self):
-        """Test skipping comments and empty lines."""
-        cards = ["# Comment", "", "  ", "Valid :: Card"]
-        
-        with patch('generate_anki_from_text.genanki') as mock_genanki:
-            mock_deck = MagicMock()
-            mock_deck.notes = []
-            mock_genanki.Deck.return_value = mock_deck
-            
-            generate_anki_from_text.create_deck("Test Deck", cards)
-            
-            # Should only be called once for "Valid :: Card"
-            self.assertEqual(mock_genanki.Note.call_count, 1)
+    def test_single_field_basic_line_needs_a_mid_tag(self):
+        notes = self._notes('[D] no separator here', '[D] [g] [mid:5:2] Q')
+        self.assertEqual(notes, [('D', 'g', 5, ['Q', ''])])
+
+    def test_unprefixed_line_lands_in_deck_named_after_file(self):
+        notes = self._notes('Question :: Answer', name='my-topic.txt')
+        self.assertEqual(notes[0][0], 'my-topic')
+
+    def test_explicit_mid_is_one_model_across_decks(self):
+        """Anki keeps notetypes per collection, so a mid used in two decks must
+        describe one model. The narrower deck's note is padded to it."""
+        notes = self._notes('[A] [g1] [mid:7:2] Q :: A', '[B] [g2] [mid:7:3] Q :: A :: C')
+        self.assertEqual(sorted(notes), [('A', 'g1', 7, ['Q', 'A', '']),
+                                         ('B', 'g2', 7, ['Q', 'A', 'C'])])
+
+    def test_no_cards_raises(self):
+        with self.assertRaises(ValueError):
+            self._notes('# only a comment')
 
 
 class TestDumpApkg(unittest.TestCase):
