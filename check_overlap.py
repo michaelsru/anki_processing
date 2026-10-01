@@ -44,6 +44,7 @@ _CLOZE_RE = re.compile(r'\{\{c\d+::(.*?)\}\}', re.DOTALL)
 _TAG_RE = re.compile(r'<[^>]+>')
 _WORD_RE = re.compile(r'\w+')
 _ANNOTATION_RE = re.compile(r'^#\s*OVERLAP\b')
+_GROUP_CLOSE_RE = re.compile(r'\](?=\s|$)')
 
 
 # ---------------------------------------------------------------------------
@@ -51,36 +52,22 @@ _ANNOTATION_RE = re.compile(r'^#\s*OVERLAP\b')
 # ---------------------------------------------------------------------------
 
 def split_bracket_groups(line, max_groups=3):
-    """Consume leading [...] groups by matching brackets, not by regex.
+    """Consume up to `max_groups` leading [...] groups. Returns (groups, remainder).
 
-    A regex like ^(\\[[^\\]]+\\]\\s*)+ truncates on GUIDs that contain ']'.
-    Returns (groups, remainder).
+    A group opens at a leading '[' and closes at the first ']' followed by
+    whitespace or end of line. Bracket depth can't be used: base91 GUIDs may
+    contain unbalanced '[' or ']' (e.g. [Pr0gsJ]<qW], [ab]]), but never
+    whitespace.
     """
     groups = []
     rest = line.lstrip()
 
     while len(groups) < max_groups and rest.startswith('['):
-        depth = 0
-        end = -1
-        for i, ch in enumerate(rest):
-            if ch == '[':
-                depth += 1
-            elif ch == ']':
-                depth -= 1
-                if depth == 0:
-                    end = i
-                    break
-        if end == -1:
-            break  # unbalanced — leave the rest alone
-
-        after = rest[end + 1:]
-        # A group must be followed by whitespace, otherwise it's card content
-        # (e.g. a card whose question legitimately starts with a bracket).
-        if after and not after[0].isspace():
+        close = _GROUP_CLOSE_RE.search(rest, 1)
+        if not close:
             break
-
-        groups.append(rest[1:end])
-        rest = after.lstrip()
+        groups.append(rest[1:close.start()])
+        rest = rest[close.start() + 1:].lstrip()
 
     return groups, rest
 

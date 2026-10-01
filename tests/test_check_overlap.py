@@ -38,11 +38,25 @@ class TestParsing(unittest.TestCase):
         self.assertEqual(c['front'], 'One')
         self.assertEqual(c['back'], 'Two Three')
 
-    def test_malformed_guid_bracket_is_not_swallowed(self):
-        """A GUID containing ']' is left in the content rather than truncated."""
-        c = co.parse_card_line('[Deck] [ab]cd] Front :: Back')
+    def test_guid_with_unbalanced_brackets(self):
+        c = co.parse_card_line('[Deck] [Pr0gsJ]<qW] [mid:1:2] Front :: Back')
         self.assertEqual(c['deck'], 'Deck')
-        self.assertIn('ab', c['front'])
+        self.assertEqual(c['guid'], 'Pr0gsJ]<qW')
+        self.assertEqual(c['mid'], 'mid:1:2')
+        self.assertEqual(c['front'], 'Front')
+
+    def test_guid_ending_in_bracket(self):
+        c = co.parse_card_line('[D] [ab]] Q :: A')
+        self.assertEqual(c['guid'], 'ab]')
+        self.assertEqual(c['front'], 'Q')
+
+    def test_bracket_guid_collision_detected(self):
+        line = ('[Embedded] [Pr0gsJ]<qW] [mid:9988776655:2] {{c1::JTAG/SWD}} '
+                'are hardware debug interfaces.')
+        corpus = [co.parse_card_line(line)]
+        cands = [co.parse_card_line(line.replace('debug', 'programming'))]
+        collisions = co.find_guid_collisions(cands, corpus)
+        self.assertEqual([c['guid'] for c in collisions], ['Pr0gsJ]<qW'])
 
 
 class TestNormalization(unittest.TestCase):
