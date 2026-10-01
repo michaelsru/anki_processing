@@ -4,6 +4,7 @@ import os
 import json
 import sqlite3
 import shutil
+import sys
 import argparse
 from anki_unpacker import AnkiDeckUnpacker
 from card_format import format_card_line
@@ -29,27 +30,19 @@ def _get_notes_with_decks(db_path):
             deck_id_to_name = {r[0]: r[1].replace('\x1f', '::') for r in deck_rows}
 
         # --- Model ID → declared field count ---
+        # Newer Anki keeps notetype fields in a `fields` table. genanki and
+        # legacy exports have no such table, only the col.models JSON.
         try:
-            # Newer Anki: separate `fields` table keyed by ntid
             fc_rows = conn.execute("SELECT ntid, COUNT(*) FROM fields GROUP BY ntid").fetchall()
             mid_to_field_count = {r[0]: r[1] for r in fc_rows}
-            print(f"[debug] fields table: {len(fc_rows)} models → {dict(list(mid_to_field_count.items())[:5])}")
-        except Exception as e:
-            print(f"[debug] fields table query failed: {e}")
+        except sqlite3.OperationalError:
             mid_to_field_count = {}
 
         if not mid_to_field_count:
-            # Legacy: col.models JSON, each model has a 'flds' array
-            try:
-                models_row = conn.execute("SELECT models FROM col LIMIT 1").fetchone()
-                if models_row and models_row[0]:
-                    models_json = json.loads(models_row[0])
-                    mid_to_field_count = {int(k): len(v["flds"]) for k, v in models_json.items()}
-                    print(f"[debug] col.models fallback: {len(mid_to_field_count)} models")
-                else:
-                    print("[debug] col.models is empty — no field count available")
-            except Exception as e:
-                print(f"[debug] col.models fallback failed: {e}")
+            models_row = conn.execute("SELECT models FROM col LIMIT 1").fetchone()
+            if models_row and models_row[0]:
+                models_json = json.loads(models_row[0])
+                mid_to_field_count = {int(k): len(v["flds"]) for k, v in models_json.items()}
 
         # --- Notes + cards join ---
         rows = conn.execute("""
@@ -106,7 +99,7 @@ def _generate_html(notes, output_dir, deck_name):
     
     html_content = [
         "<html><head><style>",
-        "body { font-family: sans-serif; max_width: 800px; margin: 20px auto; background: #f4f4f9; }",
+        "body { font-family: sans-serif; max-width: 800px; margin: 20px auto; background: #f4f4f9; }",
         ".card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }",
         "img { max-width: 100%; height: auto; }",
         ".field-sep { border-top: 1px dashed #ccc; margin: 10px 0; }",
@@ -159,18 +152,12 @@ def main():
     
     if not os.path.exists(args.apkg_path):
         print(f"Error: File not found: {args.apkg_path}")
-        return
+        sys.exit(1)
 
     unpack_and_review(args.apkg_path, args.output_dir)
 
-    # Verify GUIDs
     print("\n--- Verifying GUIDs ---")
-    try:
-        verify(os.path.join(args.output_dir, "cards.txt"), args.apkg_path)
-    except ImportError:
-        print("Warning: verify_guids module not found. Skipping verification.")
-    except Exception as e:
-        print(f"Warning: Verification failed: {e}")
+    verify(os.path.join(args.output_dir, "cards.txt"), args.apkg_path)
 
 if __name__ == "__main__":
     main()
