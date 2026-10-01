@@ -88,6 +88,14 @@ class TestGeneratorCli(unittest.TestCase):
             notes = notes_in_apkg(apkgs[0])
         self.assertEqual(notes, [('g1', genanki.guid_for('Q', 1), 1, ['Q', 'A'])])
 
+    def test_invalid_file_exits_non_zero_with_line_numbers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proc, apkgs = run_generator_cli(['[D] [a] [mid:5:2] Q :: A',
+                                             '[D] [b] [mid:5:2] Q :: A :: extra'], tmp)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn('cards.txt:2', proc.stdout)
+        self.assertEqual(apkgs, [])
+
 
 def generate_from_lines(lines, tmp, name='cards.txt'):
     """Write `lines` to <tmp>/<name>, generate into <tmp>/out, return the notes."""
@@ -160,6 +168,48 @@ class TestGenerateAnkiFromText(unittest.TestCase):
     def test_no_cards_raises(self):
         with self.assertRaises(ValueError):
             self._notes('# only a comment')
+
+    def _error(self, *lines):
+        with self.assertRaises(ValueError) as ctx:
+            self._notes(*lines)
+        return str(ctx.exception)
+
+    def test_more_fields_than_declared_count_names_each_line(self):
+        """template_cards.txt rule 3(b): a line that adds a field must bump its
+        own COUNT. genanki would otherwise fail inside write_to_file with no
+        line number."""
+        msg = self._error('[D] [a] [mid:5:2] Q :: A :: extra',
+                          '[D] [b] [mid:5:2] Q :: A',
+                          '[D] [c] [mid:5:2] Q :: A :: more :: still')
+        self.assertIn('cards.txt:1', msg)
+        self.assertIn('cards.txt:3', msg)
+        self.assertNotIn('cards.txt:2', msg)
+        self.assertEqual(glob.glob(os.path.join(self.tmp, 'out', '*.apkg')), [])
+
+    def test_mid_shared_by_cloze_and_basic_lines_is_an_error(self):
+        """genanki keys models by id, so a basic and a cloze model with the same
+        mid silently collapse into whichever was added last."""
+        msg = self._error('[D] [a] [mid:5:2] Q :: A',
+                          '[E] [b] [mid:5:2] {{c1::X}} :: extra')
+        self.assertIn('cards.txt:1', msg)
+        self.assertIn('cards.txt:2', msg)
+        self.assertIn('cloze', msg)
+
+    def test_explicit_mid_colliding_with_a_derived_model_id_is_an_error(self):
+        derived_3_field_id = generate_anki_from_text.BASIC_MODEL_ID_BASE + 3
+        msg = self._error(f'[D] [a] [mid:{derived_3_field_id}:2] Q :: A',
+                          '[D] [b] F1 :: F2 :: F3')
+        self.assertIn('cards.txt:1', msg)
+        self.assertIn('cards.txt:2', msg)
+
+    def test_failed_run_leaves_the_last_good_package_in_place(self):
+        out = os.path.join(self.tmp, 'out')
+        os.makedirs(out)
+        old = os.path.join(out, 'old.apkg')
+        open(old, 'w').close()
+        self._error('[D] [a] [mid:5:2] Q :: A :: extra')
+        self.assertTrue(os.path.exists(old))
+        self.assertFalse(os.path.exists(os.path.join(out, 'archive')))
 
 
 class TestDumpApkg(unittest.TestCase):
