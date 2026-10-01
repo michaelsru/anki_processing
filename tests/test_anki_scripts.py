@@ -60,9 +60,21 @@ class TestVerifyGuids(unittest.TestCase):
         apkg = glob.glob(os.path.join(tmp, 'out', '*.apkg'))[0]
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            verify_guids.verify(os.path.join(tmp, 'cards.txt'), apkg)
+            counts = verify_guids.verify(os.path.join(tmp, 'cards.txt'), apkg)
         self.assertIn('MATCHES: 2', out.getvalue())
         self.assertIn('SUCCESS', out.getvalue())
+        self.assertEqual(counts, {'matched': 2, 'missing': 0, 'unexpected': 0})
+
+    def test_counts_missing_and_unexpected(self):
+        tmp = tempfile.mkdtemp()
+        generate_from_lines(['[D] [g1] Q :: A', '[D] [g2] X :: Y'], tmp)
+        apkg = glob.glob(os.path.join(tmp, 'out', '*.apkg'))[0]
+        edited = os.path.join(tmp, 'edited.txt')
+        with open(edited, 'w') as f:
+            f.write('[D] [g1] Q :: A\n[D] [g3] New :: Card\n[D] Derived guid :: skipped\n')
+        with contextlib.redirect_stdout(io.StringIO()):
+            counts = verify_guids.verify(edited, apkg)
+        self.assertEqual(counts, {'matched': 1, 'missing': 1, 'unexpected': 1})
 
 
 class TestGeneratorCli(unittest.TestCase):

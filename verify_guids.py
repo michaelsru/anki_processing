@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 
-import sqlite3
-import zipfile
+import argparse
+import io
 import os
 import shutil
-import zstandard
-import io
-
+import sqlite3
+import sys
 import tempfile
+import zipfile
+
+import zstandard
+
+from card_format import load_cards
 
 def get_guids_from_apkg(apkg_path):
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -46,59 +50,39 @@ def get_guids_from_apkg(apkg_path):
         return guids
 
 def verify(txt_path, apkg_path, verbose=False):
-    expected_cards = {} # {guid: front}
-    
-    with open(txt_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            # Use partition to find the first occurrence of '] '
-            if line.startswith('[') and '] ' in line:
-                part1, sep, part2 = line.partition('] ')
-                guid = part1[1:]
-                
-                # Extract Front content (everything before ' :: ')
-                if ' :: ' in part2:
-                    front = part2.split(' :: ')[0]
-                else:
-                    front = part2 # Fallback if no back field
-                    
-                expected_cards[guid] = front
-    
+    """Compare the GUIDs in a card-format text file with those in a package.
+
+    Lines without a GUID are skipped: theirs is derived from the front text
+    and model id at generation time. Returns {'matched', 'missing',
+    'unexpected'} counts, where missing GUIDs are in the text file only and
+    unexpected GUIDs are in the package only.
+    """
+    expected_cards = {c['guid']: c['front'] for c in load_cards(txt_path) if c['guid']}
     actual_cards = get_guids_from_apkg(apkg_path)
-    
-    expected_guids = set(expected_cards.keys())
-    actual_guids = set(actual_cards.keys())
-    
+
+    expected_guids = set(expected_cards)
+    actual_guids = set(actual_cards)
+
     missing = expected_guids - actual_guids
     unexpected = actual_guids - expected_guids
-    
-    # print matches
     matches = expected_guids & actual_guids
     print(f"✅ MATCHES: {len(matches)}")
-    
+
     if not missing and not unexpected:
         print("✅ SUCCESS: All GUIDs match!")
-    else:
-        if missing:
-            print(f"{len(missing)} mismatched cards found in {txt_path}")
-            if verbose:
-                for guid in missing:
-                    print(f"✅ [MISMATCHED] {expected_cards.get(guid, 'Unknown')}")
-            # else:
-            #     for guid in missing:
-            #         print(f"✅ {guid}")
-                    
-        if unexpected:
-            print(f"{len(unexpected)} mismatched cards found in {apkg_path}")
-            if verbose:
-                for guid in unexpected:
-                    print(f"❌ [MISMATCHED] {actual_cards.get(guid, 'Unknown')}")
-            # else:
-            #     for guid in unexpected:
-            #         print(f"❌ {guid}")
+    if missing:
+        print(f"{len(missing)} mismatched cards found in {txt_path}")
+        if verbose:
+            for guid in missing:
+                print(f"✅ [MISMATCHED] {expected_cards[guid]}")
+    if unexpected:
+        print(f"{len(unexpected)} mismatched cards found in {apkg_path}")
+        if verbose:
+            for guid in unexpected:
+                print(f"❌ [MISMATCHED] {actual_cards[guid]}")
 
-import argparse
-import sys
+    return {'matched': len(matches), 'missing': len(missing), 'unexpected': len(unexpected)}
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Verify that GUIDs in an .apkg match the source text file')

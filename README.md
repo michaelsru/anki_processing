@@ -60,10 +60,9 @@ Verifies that the GUIDs in a generated `.apkg` match the source text file.
 **Options**:
 - `--verbose` or `-v`: Print the content of missing or unexpected cards to help identify discrepancies.
 
-⚠️ **Known bug**: `verify` reads the first bracket group as the GUID, so on
-deck-prefixed files it compares deck names against real GUIDs and reports every
-card as mismatched. This also affects the verification step `dump_apkg.py` runs
-automatically. Ignore that section until it's fixed.
+Lines without a GUID are skipped, because their GUID is derived from the front
+text and the model id at generation time. `dump_apkg.py` runs this check on its
+own output automatically.
 
 ### 4. `check_overlap.py`
 Flags candidate cards that duplicate cards already in your collection, so you

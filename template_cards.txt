@@ -7,8 +7,8 @@
 #     python generate_anki_from_text.py template_cards.txt
 #
 # Copy it, replace the example lines, and generate. Every rule below was derived
-# from the parser in generate_anki_from_text.py (parse_deck_prefix + create_deck)
-# and the emitter in dump_apkg.py (_generate_text).
+# from the parser and writer in card_format.py and the model logic in
+# generate_anki_from_text.py (build_models + create_deck).
 #
 # -----------------------------------------------------------------------------
 # LINE FORMAT
@@ -130,12 +130,8 @@
 #   Inspect:   python dump_apkg.py generated_decks/<name>.apkg
 #              -> anki_review_output/index.html   (visual preview)
 #              -> anki_review_output/cards.txt    (this format — edit and re-generate)
-#
-#   NOTE: dump_apkg.py's "--- Verifying GUIDs ---" step will report every card as
-#   mismatched on any deck-prefixed file. verify_guids.py reads the FIRST bracket
-#   as the GUID and so compares deck names against real GUIDs. It is a one-line
-#   bug in verify_guids.verify(), not a problem with your deck. Ignore that
-#   section, or fix it to skip the deck prefix.
+#              The "--- Verifying GUIDs ---" step then checks that every GUID in
+#              cards.txt is in the package and vice versa.
 #
 # =============================================================================
 # EXAMPLES — all of the lines below are live and will generate real cards.

@@ -29,10 +29,9 @@ their whole collection. If it doesn't, tell them:
 > In Anki: **File → Export → All Decks**, include scheduling, save as `.apkg`.
 > Then run `python dump_apkg.py <export>.apkg`.
 
-Ignore the `--- Verifying GUIDs ---` section of that output. `verify_guids.py`
-reads the first bracket as the GUID, so on deck-prefixed files it compares deck
-names against real GUIDs and reports everything as mismatched. It's a known bug,
-not a problem with the deck.
+The `--- Verifying GUIDs ---` section of that output should end in `SUCCESS`.
+If it reports mismatches, the dump and the export disagree, and the corpus is
+not trustworthy.
 
 ## Step 2 — Read the format
 
