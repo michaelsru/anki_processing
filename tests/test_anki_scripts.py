@@ -1,13 +1,65 @@
+import glob
+import json
+import sqlite3
+import subprocess
+import tempfile
 import unittest
+import zipfile
 from unittest.mock import MagicMock, patch, mock_open
 import sys
 import os
 
 # Add parent directory to path to import scripts
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(REPO)
+
+import genanki
 
 import generate_anki_from_text
 import dump_apkg
+
+
+def notes_in_apkg(apkg_path):
+    """Read (deck name, guid, mid, fields) per note straight from the package's
+    SQLite, independent of every parser in the repo."""
+    with tempfile.TemporaryDirectory() as tmp:
+        with zipfile.ZipFile(apkg_path) as z:
+            z.extract('collection.anki2', tmp)
+        conn = sqlite3.connect(os.path.join(tmp, 'collection.anki2'))
+        try:
+            decks = json.loads(conn.execute('SELECT decks FROM col').fetchone()[0])
+            rows = conn.execute(
+                'SELECT n.guid, n.mid, n.flds, MIN(c.did) FROM notes n '
+                'JOIN cards c ON c.nid = n.id GROUP BY n.id').fetchall()
+        finally:
+            conn.close()
+    return [(decks[str(did)]['name'], guid, mid, flds.split('\x1f'))
+            for guid, mid, flds, did in rows]
+
+
+def run_generator_cli(lines, cwd):
+    """Run generate_anki_from_text.py on a cards file inside `cwd`, so its
+    generated_decks/ lands there. Returns (completed process, apkg paths)."""
+    src = os.path.join(cwd, 'cards.txt')
+    with open(src, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines) + '\n')
+    proc = subprocess.run(
+        [sys.executable, os.path.join(REPO, 'generate_anki_from_text.py'), src],
+        cwd=cwd, capture_output=True, text=True)
+    return proc, glob.glob(os.path.join(cwd, 'generated_decks', '*.apkg'))
+
+
+class TestGeneratorCli(unittest.TestCase):
+    def test_deck_like_guid_then_mid_tag(self):
+        """[g1] [mid:1:2] Q :: A has a deck-shaped first group and no GUID. The
+        deck-first rule makes g1 the deck; the mid tag is never the GUID."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proc, apkgs = run_generator_cli(['[g1] [mid:1:2] Q :: A'], tmp)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertEqual(len(apkgs), 1)
+            notes = notes_in_apkg(apkgs[0])
+        self.assertEqual(notes, [('g1', genanki.guid_for('Q', 1), 1, ['Q', 'A'])])
+
 
 class TestGenerateAnkiFromText(unittest.TestCase):
     def setUp(self):
