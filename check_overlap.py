@@ -44,7 +44,8 @@ STOPWORDS = {
 _CLOZE_RE = re.compile(r'\{\{c\d+::(.*?)\}\}', re.DOTALL)
 _TAG_RE = re.compile(r'<[^>]+>')
 _WORD_RE = re.compile(r'\w+')
-_ANNOTATION_RE = re.compile(r'^#\s*OVERLAP\b')
+# "# OVERLAP-DROPPED <card>" is a card --strict commented out, not an annotation.
+_ANNOTATION_RE = re.compile(r'^#\s*OVERLAP(?=\s|$)')
 _GROUP_CLOSE_RE = re.compile(r'\](?=\s|$)')
 
 
