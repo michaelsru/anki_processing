@@ -313,9 +313,13 @@ before the overlap pass runs at all:
 
 ```bash
 CAND=candidates/<the file you are checking>.txt
-cat anki_review_output/cards.txt $(ls candidates/*.txt | grep -vx "$CAND") > /tmp/corpus.txt
+awk 1 anki_review_output/cards.txt $(ls candidates/*.txt | grep -vx "$CAND") > /tmp/corpus.txt
 python check_overlap.py "$CAND" --corpus /tmp/corpus.txt
 ```
+
+`awk 1` rather than `cat`: it ends every line with a newline, so a file whose
+last line has none (dumps made before `dump_apkg.py` wrote one) cannot glue its
+last card onto the first line of the next file.
 
 The exclusion has to name the file under check, not the topic. A topic authored
 over several pauses has several candidate files, and the others belong in the
@@ -382,12 +386,18 @@ somewhere safe immediately after generating it:
 
 ```bash
 mkdir -p /tmp/hold
-for f in topic_a topic_b topic_c; do
+for f in topic_a topic-b topic_c; do
   ./venv/bin/python generate_anki_from_text.py candidates/$f.txt
-  cp generated_decks/${f}_*.apkg /tmp/hold/
+  safe=$(printf '%s' "$f" | sed 's/[^A-Za-z0-9_]/_/g')
+  cp generated_decks/${safe}_????-??-??.apkg /tmp/hold/
 done
 cp /tmp/hold/*.apkg generated_decks/
 ```
+
+The generator replaces every non-word character in the file name with `_`, so
+`coresight-3.txt` becomes `coresight_3_<date>.apkg`. The `safe` line applies the
+same transform, and the date-shaped glob stops `coresight` from also matching
+`coresight_3_<date>.apkg`.
 
 Verify note counts by reading the SQLite inside each `.apkg` rather than trusting
 the generator's console output, which reports what it *intended* to write.

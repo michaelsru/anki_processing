@@ -4,9 +4,8 @@ This project contains a suite of tools for generating, managing, and inspecting 
 
 ## Key Features
 - **Text-to-Anki Generation**: Convert simple text files into Anki packages.
-- **Stable GUIDs**: Preserves learning progress by assigning persistent IDs to cards.
+- **Stable GUIDs**: A card with an explicit `[GUID]` keeps it across regenerations, so Anki updates the note and keeps its review history. A card without one gets a GUID derived from its front text, which changes whenever that text does.
 - **Deck Inspection**: Extract and view the contents of any `.apkg` file (supports modern Anki V2/V3 formats and Zstd compression).
-- **Migration Tools**: Helpers to convert existing decks or HTML dumps into the supported text format.
 
 ## File Format
 The source text file (e.g., `cards.txt`) uses a line-per-card format:
@@ -38,23 +37,29 @@ runnable example — every rule, every trap, with live cards you can generate as
 ### 1. `generate_anki_from_text.py`
 The main script to generate `.apkg` files.
 ```bash
-./venv/bin/python generate_anki_from_text.py cards.txt
+./venv/bin/python generate_anki_from_text.py candidates/i2c.txt
 ```
-**Output**: `cards_basic_[DATE].apkg`
+**Output**: `generated_decks/<name>_<date>.apkg`, where `<name>` is the input
+file's name with non-word characters replaced by `_`. Existing packages in
+`generated_decks/` are moved to `generated_decks/archive/` first. A file whose
+`[mid:ID:COUNT]` tags contradict each other (a line with more fields than its
+COUNT, or one mid used by both cloze and basic lines) is refused with the file
+and line number of every offending line, and nothing is written or archived.
 
 ### 2. `dump_apkg.py`
 Extracts and visualizes the contents of an `.apkg` file. Useful for verifying deck content without opening Anki.
 ```bash
-./venv/bin/python dump_apkg.py cards_basic_2025-12-10.apkg
+./venv/bin/python dump_apkg.py generated_decks/i2c_2025-12-10.apkg
 ```
 **Output**:
 - `anki_review_output/index.html`: HTML preview of the deck.
-- `anki_review_output/deck_raw.txt`: Raw text format (for re-importing/editing).
+- `anki_review_output/cards.txt`: Raw text format (for re-importing/editing).
+- `anki_review_output/media/`: any media files in the package.
 
 ### 3. `verify_guids.py`
 Verifies that the GUIDs in a generated `.apkg` match the source text file.
 ```bash
-./venv/bin/python verify_guids.py cards.txt cards_basic_2025-12-10.apkg
+./venv/bin/python verify_guids.py anki_review_output/cards.txt generated_decks/i2c_2025-12-10.apkg
 ```
 
 **Options**:
@@ -86,6 +91,16 @@ flagged cards out), `--clean` (strip annotations), `--allow-existing-guids`.
 
 Deliberately loose: it's the recall stage, you're the precision stage.
 
+### Supporting modules
+- `card_format.py`: parses and writes the card line format. Every script above
+  reads lines through it, so there is one answer to which bracket is the deck.
+- `anki_unpacker.py`: extracts an `.apkg` (zip, Zstandard, media map) for
+  `dump_apkg.py`.
+- `cleanup_archive.py`: deletes everything in `generated_decks/archive/` after
+  asking.
+- `run_tests.py`: runs the test suite, same as
+  `./venv/bin/python -m unittest discover tests`.
+
 ## Workflow
 1.  **Export the FULL collection** from Anki (File → Export → All Decks) and run
     `dump_apkg.py` on it. `dump_apkg.py` wipes its output directory each run, so
@@ -93,7 +108,7 @@ Deliberately loose: it's the recall stage, you're the precision stage.
     dedup against a partial corpus looks like it's working when it isn't.
 2.  **Distill** new material into `candidates/<topic>.txt` (see `template_cards.txt`).
 3.  **Check**: Run `check_overlap.py` and adjudicate anything flagged.
-4.  **Generate**: Append approved cards to `cards.txt`, run `generate_anki_from_text.py`.
+4.  **Generate**: Run `generate_anki_from_text.py candidates/<topic>.txt`.
 5.  **Import**: Double-click the generated `.apkg` to import into Anki.
 6.  **Study**: Anki will update existing cards (preserving scheduling) and add new ones.
 

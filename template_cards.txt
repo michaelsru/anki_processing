@@ -34,8 +34,6 @@
 #     [15938472] Front :: Back           <-- WRONG
 #
 # creates a deck literally named "15938472" and throws the GUID away.
-# (Note: README.md still documents this old GUID-only form. It is stale — the
-# deck-prefix support added later took that syntax over. Use the prefix.)
 # Always write both:
 #
 #     [My Deck] [15938472] Front :: Back  <-- RIGHT
