@@ -225,7 +225,7 @@ things: candidates vs. corpus, candidates vs. each other, and GUID collisions
 (which exit non-zero, because generating over a colliding GUID silently
 overwrites the existing card).
 
-The threshold defaults to 0.45 and is deliberately loose. **The script is the
+The threshold defaults to 0.5 and is deliberately loose. **The script is the
 recall stage; you are the precision stage.** Expect false positives — that is
 the design, not a bug.
 
@@ -239,21 +239,27 @@ cat anki_review_output/cards.txt candidates/*.txt > /tmp/corpus.txt
 python check_overlap.py candidates/<topic>.txt --corpus /tmp/corpus.txt
 ```
 
-**Short fronts produce junk corpus matches.** After stopword removal, "What does
-`ATI` request?" is two tokens, so one shared word scores 0.5 containment and
-clears the threshold. Against a large corpus, nearly every short command-style
-front collides with something unrelated — expect matches like "What does EPS
-stand for?" against "What does LIFO stand for in regard to a Stack?". Judge these
-by the `back` score: a genuine duplicate has a non-trivial one.
+**Each card is scored as one bag of words.** Front and back are pooled, with
+cloze deletions unwrapped, so a cloze candidate is compared against the whole of
+a basic card and not just its question. `score` is the share of the candidate's
+words that appear in the other card. `shared` is how many words the two have in
+common. A pair is flagged only when `score` clears the threshold and the cards
+share at least three words (or every word, for a candidate shorter than that).
+The floor keeps two-word fronts like "What does EPS stand for?" from matching
+every other "stand for" card.
 
 ## Step 5 — Adjudicate every flagged card
 
-Read the two scores. They mean different things:
+The scores rank matches. They don't decide them, so read both cards:
 
-- **High `front`, high `back`** → true duplicate. Drop the candidate.
-- **High `front`, low `back`** → same question, different answer. Usually a real
-  distinction the lexical check can't see (`100 kHz` vs `400 kHz` share every
-  word but the number). Usually keep, but read both before deciding.
+- **High `score`, many `shared` words** → usually a true duplicate. Drop the
+  candidate.
+- **High `score`, but the differing words are the fact** → a real distinction
+  the lexical check can't see (`100 kHz` vs `400 kHz` share every word but the
+  number). Usually keep.
+- **`(same words, swapped sides)`** → the candidate asks the reverse of an
+  existing basic card. Treat it as a duplicate unless the user wants both
+  directions.
 - **Flagged against another candidate** → you distilled the same fact twice from
   one document. Merge them.
 - **Existing card is nearly right but incomplete** → merge into the existing
@@ -264,10 +270,8 @@ Read the two scores. They mean different things:
 Present the decisions to the user before acting on them. Don't silently drop
 cards — that's why the tool annotates rather than deletes.
 
-Known limitation: the check compares front-to-front and back-to-back, never
-front-to-back, so it cannot see that a candidate restates the *reverse* of an
-existing card (deliberate — `create_reverse_cards.py` makes such pairs on
-purpose). It also can't catch a paraphrase with no shared vocabulary.
+Known limitation: the check is lexical, so it can't catch a paraphrase with no
+shared vocabulary, such as a cloze that rewords every term of an existing card.
 
 ## Step 6 — Generate
 
@@ -319,5 +323,5 @@ python check_overlap.py cand.txt --threshold 0.3    # widen the net
 python check_overlap.py cand.txt --annotate         # write notes above flagged cards
 python check_overlap.py cand.txt --clean            # strip those notes again
 python check_overlap.py cand.txt --strict           # comment out flagged cards
-python -m unittest discover tests -v                # no genanki needed
+python -m unittest tests.test_check_overlap -v      # no genanki needed
 ```
