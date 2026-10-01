@@ -25,7 +25,8 @@ import re
 import sys
 
 DEFAULT_CORPUS = os.path.join("anki_review_output", "cards.txt")
-DEFAULT_THRESHOLD = 0.45
+DEFAULT_THRESHOLD = 0.5
+MIN_SHARED = 3
 
 # Question fronts are mostly interrogative boilerplate. Without this, every
 # "What is the ...?" card looks like every other "What is the ...?" card.
@@ -180,30 +181,55 @@ def jaccard(a, b):
 
 
 def score_pair(cand_tokens, other_tokens):
-    """Score a candidate against another card on front and back separately."""
-    fs = containment(cand_tokens['front'], other_tokens['front'])
-    bs = containment(cand_tokens['back'], other_tokens['back'])
+    """Score a candidate against another card using each card's whole word bag."""
+    a, b = cand_tokens['all'], other_tokens['all']
     return {
-        'front': round(fs, 3),
-        'back': round(bs, 3),
-        'front_jaccard': round(jaccard(cand_tokens['front'], other_tokens['front']), 3),
-        'back_jaccard': round(jaccard(cand_tokens['back'], other_tokens['back']), 3),
+        'score': round(containment(a, b), 3),
+        'shared': len(a & b),
+        'size': len(a),
+        'jaccard': round(jaccard(a, b), 3),
+        'swapped': _is_swapped(cand_tokens, other_tokens),
     }
 
 
-def is_flagged(scores, threshold):
-    """A similar FRONT is the duplicate signal.
+def _is_swapped(cand_tokens, other_tokens):
+    """Basic cards whose front and back trade places, e.g. a reverse card.
 
-    A shared back with a different front is usually an intentional reverse card
-    (see create_reverse_cards.py), so back similarity alone never flags.
+    The crossed fit must also beat the straight fit: a card whose front and
+    back share words would otherwise look swapped against its own duplicate.
     """
-    if scores['front'] >= threshold:
-        return True
-    return scores['front'] >= threshold * 0.7 and scores['back'] >= threshold
+    if cand_tokens['cloze'] or other_tokens['cloze']:
+        return False
+    cross_front = containment(cand_tokens['front'], other_tokens['back'])
+    cross_back = containment(cand_tokens['back'], other_tokens['front'])
+    straight = (containment(cand_tokens['front'], other_tokens['front'])
+                + containment(cand_tokens['back'], other_tokens['back']))
+    return (cross_front >= 0.5 and cross_back >= 0.5
+            and cross_front + cross_back > straight)
+
+
+def is_flagged(scores, threshold):
+    """Flag when most of the candidate's words appear in the other card.
+
+    Fronts and backs are pooled because a cloze card holds everything in its
+    first field and usually nothing in its second, so comparing front to front
+    and back to back compared the wrong parts whenever a cloze card met a
+    basic one. The shared-word floor stops a two-word front such as "What does
+    APN stand for?" from matching every other "stand for" card. Capping the
+    floor at the candidate's size keeps an exact duplicate of a tiny card
+    flaggable.
+
+    Reverse cards are flagged too. `swapped` labels them for the human but
+    never decides the flag.
+    """
+    return (scores['score'] >= threshold
+            and scores['shared'] >= min(MIN_SHARED, scores['size']))
 
 
 def tokens_for(card):
-    return {'front': tokenize(card['front']), 'back': tokenize(card['back'])}
+    front, back = tokenize(card['front']), tokenize(card['back'])
+    return {'front': front, 'back': back, 'all': front | back,
+            'cloze': '{{c' in card['front']}
 
 
 def find_overlaps(candidates, corpus, threshold, top_n=3):
@@ -227,7 +253,7 @@ def find_overlaps(candidates, corpus, threshold, top_n=3):
             if is_flagged(scores, threshold):
                 matches.append({'source': 'candidate', 'card': other, 'scores': scores})
 
-        matches.sort(key=lambda m: (m['scores']['front'], m['scores']['back']),
+        matches.sort(key=lambda m: (m['scores']['score'], m['scores']['shared']),
                      reverse=True)
         if matches:
             results.append({'candidate': cand, 'matches': matches[:top_n]})
@@ -243,6 +269,10 @@ def find_guid_collisions(candidates, corpus):
 # ---------------------------------------------------------------------------
 # Reporting
 # ---------------------------------------------------------------------------
+
+def _swap_label(scores):
+    return " (same words, swapped sides)" if scores['swapped'] else ""
+
 
 def format_report(results, candidates, corpus, threshold):
     out = []
@@ -261,8 +291,9 @@ def format_report(results, candidates, corpus, threshold):
             s = m['scores']
             tag = "existing" if m['source'] == 'corpus' else "candidate"
             loc = m['card'].get('guid') or f"line {m['card']['lineno']}"
-            out.append(f"     front={s['front']:<5} back={s['back']:<5} "
-                       f"[{tag}] [{m['card'].get('deck') or '?'}] [{loc}]")
+            out.append(f"     score={s['score']:<5} shared={s['shared']} "
+                       f"[{tag}] [{m['card'].get('deck') or '?'}] [{loc}]"
+                       f"{_swap_label(s)}")
             out.append(f"       {m['card']['front'][:100]}")
         out.append("")
 
@@ -291,8 +322,8 @@ def annotate_file(path, results):
             for m in r['matches']:
                 s = m['scores']
                 loc = m['card'].get('guid') or f"line {m['card']['lineno']}"
-                out.append(f"# OVERLAP front={s['front']} back={s['back']} "
-                           f"[{m['card'].get('deck') or '?'}] [{loc}] "
+                out.append(f"# OVERLAP score={s['score']} shared={s['shared']} "
+                           f"[{m['card'].get('deck') or '?'}] [{loc}]{_swap_label(s)} "
                            f"{m['card']['front'][:120]}\n")
         out.append(line)
 
@@ -340,7 +371,8 @@ def main():
                         help=f'Existing cards to compare against (default: {DEFAULT_CORPUS}). '
                              'Should be a dump of your FULL collection, not one deck.')
     parser.add_argument('--threshold', type=float, default=DEFAULT_THRESHOLD,
-                        help=f'Similarity threshold, lower = more flagged (default: {DEFAULT_THRESHOLD})')
+                        help='Fraction of a candidate\'s words that must appear in another card, '
+                             f'lower = more flagged (default: {DEFAULT_THRESHOLD})')
     parser.add_argument('--top', type=int, default=3, help='Max matches shown per candidate')
     parser.add_argument('--json', action='store_true', help='Emit JSON instead of a text report')
     parser.add_argument('--annotate', action='store_true',

@@ -71,12 +71,17 @@ don't study the same fact twice.
 ```bash
 ./venv/bin/python check_overlap.py candidates/i2c.txt --corpus anki_review_output/cards.txt
 ```
-Scores each candidate's **front** and **back** separately against the corpus
-(shared back with a different front is usually an intentional reverse card, not a
-duplicate), also dedups candidates against each other, and hard-errors on GUID
-collisions that would silently overwrite existing cards.
+Each card's front and back are pooled into one bag of content words, because a
+cloze card keeps everything in its first field. A candidate is flagged when at
+least half of its words appear in another card and the two share at least 3
+words (or every word, for a candidate shorter than that). The floor keeps a
+two-word front like "What does APN stand for?" from matching every other
+"stand for" card. Reverse cards are flagged too, labelled "same words, swapped
+sides", so you can keep them on purpose. It also dedups candidates against each
+other, and hard-errors on GUID collisions that would silently overwrite existing
+cards.
 
-**Options**: `--threshold` (default 0.45, lower = more flagged), `--json`,
+**Options**: `--threshold` (default 0.5, lower = more flagged), `--json`,
 `--annotate` (notes above flagged cards, cards left live), `--strict` (comment
 flagged cards out), `--clean` (strip annotations), `--allow-existing-guids`.
 

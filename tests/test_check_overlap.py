@@ -107,12 +107,80 @@ class TestScoring(unittest.TestCase):
             '[D] [g2] What is priority inversion? :: A low-priority task holds a lock.')
         self.assertFalse(co.is_flagged(s, co.DEFAULT_THRESHOLD))
 
-    def test_reverse_card_pair_not_flagged(self):
-        """Shared back with a different front is an intentional reverse card."""
+    def test_cloze_rewrite_of_basic_card_flagged(self):
+        """A cloze card keeps its answer in the front, so fronts alone don't match."""
         s = self._score(
-            '[D] [g1] semaphore: decrements the count, blocking while zero :: sem_wait',
-            '[D] [g2] Name three RTOS task states :: decrements the count, blocking while zero')
+            '[D] [n] A watchdog timer {{c1::resets the system if software fails '
+            'to kick it within a set time}}.',
+            '[D] [o] What is a Watchdog Timer? :: A hardware counter that resets the '
+            'system if software gets stuck and fails to "kick" or "feed" it within a set time.')
+        self.assertTrue(co.is_flagged(s, co.DEFAULT_THRESHOLD))
+
+    def test_question_boilerplate_not_flagged(self):
+        s = self._score(
+            '[D] [g1] What does APN stand for? :: Access Point Name.',
+            '[D] [g2] What does LIFO stand for in regard to a Stack? :: Last In First Out')
         self.assertFalse(co.is_flagged(s, co.DEFAULT_THRESHOLD))
+
+    def test_two_shared_words_not_flagged(self):
+        """Half the candidate's words match, but only two words, so no flag."""
+        s = self._score(
+            '[D] [g1] What does SPI stand for? :: Serial Peripheral',
+            '[D] [g2] What does UART stand for on serial links? :: '
+            'Universal Asynchronous Receiver Transmitter')
+        self.assertEqual((s['score'], s['shared']), (0.5, 2))
+        self.assertFalse(co.is_flagged(s, co.DEFAULT_THRESHOLD))
+
+    def test_exact_duplicate_of_tiny_card_flagged(self):
+        s = self._score('[D] [g1] What is DRAM? :: Volatile.',
+                        '[D] [g2] What is DRAM? :: Volatile.')
+        self.assertEqual(s['shared'], 2)
+        self.assertTrue(co.is_flagged(s, co.DEFAULT_THRESHOLD))
+
+    def test_reverse_card_pair_flagged_as_swapped(self):
+        s = self._score(
+            '[D] [g1] sem_wait :: Decrements a semaphore count, blocking while it is zero',
+            '[D] [g2] Which POSIX call decrements a semaphore count, blocking while it '
+            'is zero? :: sem_wait')
+        self.assertTrue(co.is_flagged(s, co.DEFAULT_THRESHOLD))
+        self.assertTrue(s['swapped'])
+
+    def test_same_sided_duplicate_not_swapped(self):
+        s = self._score(
+            '[D] [g1] What speed is I2C standard mode? :: 100 kHz',
+            '[D] [g2] What is the standard-mode clock speed of I2C? :: 100 kHz')
+        self.assertFalse(s['swapped'])
+
+    def test_duplicate_whose_sides_share_words_not_swapped(self):
+        line = ('[D] [g1] Where do the Android/fastboot USB udev rules live? :: '
+                '<code>/etc/udev/rules.d/51-android.rules</code>')
+        s = self._score(line, line)
+        self.assertTrue(co.is_flagged(s, co.DEFAULT_THRESHOLD))
+        self.assertFalse(s['swapped'])
+
+    def test_cloze_card_never_swapped(self):
+        s = self._score(
+            '[D] [g1] {{c1::sem_wait}} :: Decrements a semaphore count while zero',
+            '[D] [g2] Decrements a semaphore count while zero :: sem_wait')
+        self.assertFalse(s['swapped'])
+
+    def test_report_labels_swapped_match_only(self):
+        reverse = co.parse_card_line(
+            '[D] [g1] sem_wait :: Decrements a semaphore count, blocking while it is zero')
+        reverse['lineno'] = 1
+        same = co.parse_card_line('[D] [g3] What speed is I2C standard mode? :: 100 kHz')
+        same['lineno'] = 2
+        corpus = [co.parse_card_line(l) for l in (
+            '[D] [g2] Which POSIX call decrements a semaphore count, blocking while it '
+            'is zero? :: sem_wait',
+            '[D] [g4] What is the standard-mode clock speed of I2C? :: 100 kHz')]
+        results = co.find_overlaps([reverse, same], corpus, co.DEFAULT_THRESHOLD)
+        lines = co.format_report(results, [reverse, same], corpus,
+                                 co.DEFAULT_THRESHOLD).splitlines()
+        labelled = [l for l in lines if 'same words, swapped sides' in l]
+        self.assertEqual(len(labelled), 1)
+        self.assertIn('[g2]', labelled[0])
+        self.assertTrue(any('[g4]' in l for l in lines))
 
     def test_containment_is_asymmetric(self):
         self.assertEqual(co.containment({'a'}, {'a', 'b', 'c'}), 1.0)
