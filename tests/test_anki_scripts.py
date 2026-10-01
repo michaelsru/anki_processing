@@ -19,6 +19,7 @@ import genanki
 
 import generate_anki_from_text
 import dump_apkg
+import verify_guids
 
 
 def notes_in_apkg(apkg_path):
@@ -49,6 +50,19 @@ def run_generator_cli(lines, cwd):
         [sys.executable, os.path.join(REPO, 'generate_anki_from_text.py'), src],
         cwd=cwd, capture_output=True, text=True)
     return proc, glob.glob(os.path.join(cwd, 'generated_decks', '*.apkg'))
+
+
+class TestVerifyGuids(unittest.TestCase):
+    def test_deck_prefixed_file_matches_its_package(self):
+        tmp = tempfile.mkdtemp()
+        lines = ['[Deck::One] [g1] Q :: A', '[Deck Two] [Pr0gsJ]<qW] [mid:9:2] {{c1::X}} y']
+        generate_from_lines(lines, tmp)
+        apkg = glob.glob(os.path.join(tmp, 'out', '*.apkg'))[0]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            verify_guids.verify(os.path.join(tmp, 'cards.txt'), apkg)
+        self.assertIn('MATCHES: 2', out.getvalue())
+        self.assertIn('SUCCESS', out.getvalue())
 
 
 class TestGeneratorCli(unittest.TestCase):
