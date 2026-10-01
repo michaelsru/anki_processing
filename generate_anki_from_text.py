@@ -92,15 +92,34 @@ def model_key(card):
         return ('mid', card['mid_id'])
     return ('deck', card['deck'], is_cloze(card))
 
-def build_models(cards):
-    """Build every model the cards need, keyed by model_key."""
+def build_models(cards, source):
+    """Build every model the cards need, keyed by model_key.
+
+    Raises ValueError naming `source` and every offending line when the tags
+    contradict each other, because genanki either fails later with no line
+    number or silently keeps one of two models that share an id.
+    """
     groups = {}
     for card in cards:
         groups.setdefault(model_key(card), []).append(card)
 
-    models = {}
+    problems = []
+    def problem(card, text):
+        problems.append((card['lineno'], f"{source}:{card['lineno']}: {text}"))
+
+    specs = {}
     for key, group in groups.items():
-        cloze = is_cloze(group[0])
+        for c in group:
+            if c['mid_count'] is not None and len(c['fields']) > c['mid_count']:
+                problem(c, f"{len(c['fields'])} fields but the mid tag declares {c['mid_count']}; "
+                           "bump the count on this line")
+        types = {is_cloze(c) for c in group}
+        if len(types) > 1:
+            for c in group:
+                kind = 'cloze' if is_cloze(c) else 'basic'
+                problem(c, f"[mid:{key[1]}] is used by both cloze and basic lines (this one is {kind})")
+            continue
+        cloze = types.pop()
         width = max(len(c['fields']) for c in group)
         width = max([width] + [c['mid_count'] for c in group if c['mid_count']])
         if cloze:
@@ -109,6 +128,24 @@ def build_models(cards):
             model_id = key[1]
         else:
             model_id = (CLOZE_MODEL_ID_BASE if cloze else BASIC_MODEL_ID_BASE) + width
+        specs[key] = (model_id, cloze, width)
+
+    by_id = {}
+    for key, spec in specs.items():
+        by_id.setdefault(spec[0], []).append(key)
+    for model_id, keys in by_id.items():
+        if len({specs[k][1:] for k in keys}) > 1:
+            for k in keys:
+                for c in groups[k]:
+                    problem(c, f"model id {model_id} would need {specs[k][2]} "
+                               f"{'cloze' if specs[k][1] else 'basic'} fields here but a different "
+                               "shape elsewhere; untagged cards derive their id from their width")
+
+    if problems:
+        raise ValueError("\n".join(text for _, text in sorted(problems)))
+
+    models = {}
+    for key, (model_id, cloze, width) in specs.items():
         make = create_cloze_model if cloze else create_basic_model
         models[key] = make(width, model_id=model_id)
     return models
@@ -196,7 +233,7 @@ def generate(input_path, output_dir="generated_decks"):
     if not cards:
         raise ValueError("No valid cards found.")
 
-    models = build_models(cards)
+    models = build_models(cards, input_path)
 
     by_deck = {}
     for card in cards:
@@ -206,13 +243,16 @@ def generate(input_path, output_dir="generated_decks"):
         print(f"  {deck.name}: {len(deck.notes)} cards")
 
     os.makedirs(output_dir, exist_ok=True)
-    archive_all_decks(output_dir)
-
     date_str = datetime.now().strftime("%Y-%m-%d")
     safe_name = re.sub(r'[^\w]', '_', get_deck_name(input_path))
     output_filename = os.path.join(output_dir, f"{safe_name}_{date_str}.apkg")
 
-    genanki.Package(decks).write_to_file(output_filename)
+    # Write beside the final name first so a failure here leaves the previous
+    # package where it was. archive_all_decks moves *.apkg only.
+    partial = output_filename + ".part"
+    genanki.Package(decks).write_to_file(partial)
+    archive_all_decks(output_dir)
+    os.replace(partial, output_filename)
     total = sum(len(d.notes) for d in decks)
     print(f"✅ Exported {total} cards across {len(decks)} deck(s) → {output_filename}")
     return output_filename

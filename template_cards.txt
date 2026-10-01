@@ -70,12 +70,17 @@
 #   (a) It only works AFTER a [GUID]. A bare `[mid:...]` with no GUID in front
 #       of it is swallowed as the GUID and silently ignored.
 #
-#   (b) COUNT OVERRIDES the number of fields you actually wrote. If you add a
-#       third field to a line tagged [mid:X:2], you get a 3-field note against a
-#       2-field model — a broken/rejected note. IF YOU ADD A FIELD, BUMP COUNT
-#       ON THAT LINE. Bumping it on one line is enough: it raises the field
-#       count for every note sharing that model id and pads the rest with empty
+#   (b) A line may not have more fields than its COUNT. If you add a third
+#       field to a line tagged [mid:X:2], the generator refuses the whole file
+#       and prints the file and line number of every such line, so nothing is
+#       written. IF YOU ADD A FIELD, BUMP COUNT ON THAT LINE. Bumping it on one
+#       line is enough: it raises the field count for every note sharing that
+#       model id, across every deck in the file, and pads the rest with empty
 #       fields.
+#
+#   (c) One model id is one notetype. A mid used on both a cloze line and a
+#       basic line is refused the same way, as is a hand-written mid equal to
+#       one of the derived ids below with a different width.
 #
 # Omit the tag entirely for hand-written cards. The generator then groups all
 # untagged basic cards in a deck into one model sized to the widest line, and

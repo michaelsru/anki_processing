@@ -133,8 +133,8 @@ class TestGenerateAnkiFromText(unittest.TestCase):
     def test_cloze_card_gets_extra_field_and_cloze_model(self):
         notes = self._notes('[D] [c] {{c1::Cloze}} deletion')
         self.assertEqual(notes, [('D', 'c', CLOZE_2, ['{{c1::Cloze}} deletion', ''])])
-        models = generate_anki_from_text.build_models(
-            generate_anki_from_text.read_cards(os.path.join(self.tmp, 'cards.txt')))
+        src = os.path.join(self.tmp, 'cards.txt')
+        models = generate_anki_from_text.build_models(generate_anki_from_text.read_cards(src), src)
         self.assertEqual(models[('deck', 'D', True)].model_type, genanki.Model.CLOZE)
 
     def test_cloze_with_extra(self):
