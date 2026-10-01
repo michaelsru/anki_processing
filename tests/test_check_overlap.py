@@ -243,6 +243,30 @@ class TestFileOperations(unittest.TestCase):
         with open(self.cand) as f:
             self.assertNotIn('# OVERLAP', f.read())
 
+    def test_dropped_cards_survive_clean_and_reannotate(self):
+        """--strict comments a card out as '# OVERLAP-DROPPED <card>'. That line
+        is the only copy of the card left, so --clean and later annotation runs
+        must keep it."""
+        corpus = co.load_cards(self.corpus)
+        results = co.find_overlaps(co.load_cards(self.cand), corpus, co.DEFAULT_THRESHOLD)
+        co.comment_out_flagged(self.cand, results)
+        dropped = '# OVERLAP-DROPPED [D] [n1] Define priority inversion. :: A low-priority task holds a lock.\n'
+        with open(self.cand) as f:
+            self.assertIn(dropped, f.readlines())
+
+        self.assertEqual(co.strip_annotations(self.cand), 0)
+        with open(self.cand) as f:
+            self.assertIn(dropped, f.readlines())
+
+        results = co.find_overlaps(co.load_cards(self.cand), corpus, co.DEFAULT_THRESHOLD)
+        co.annotate_file(self.cand, results)
+        with open(self.cand) as f:
+            self.assertIn(dropped, f.readlines())
+
+        co.comment_out_flagged(self.cand, results)
+        with open(self.cand) as f:
+            self.assertIn(dropped, f.readlines())
+
     def test_candidate_vs_candidate_dedup(self):
         with open(self.cand, 'w') as f:
             f.write('[D] [n1] What speed is I2C standard mode? :: 100 kHz\n')
