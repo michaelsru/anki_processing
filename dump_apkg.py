@@ -145,7 +145,7 @@ def _generate_text(notes_with_decks, output_dir):
              for flds, guid, deck_name, mid, model_field_count in notes_with_decks]
 
     with open(txt_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
+        f.writelines(line + "\n" for line in lines)
 
     print(f"Generated raw text file: {txt_path}")
 

@@ -36,8 +36,9 @@ class AnkiDeckUnpacker:
             
         count = 0
         for filename in os.listdir(self.temp_dir):
-            # Skip database files and the media map itself (if it still exists)
-            if filename.startswith("collection.anki") or filename == "media":
+            # Everything in the zip that is not a media file: the databases,
+            # the media map, and the package metadata entry.
+            if filename.startswith("collection.anki") or filename in ("media", "meta"):
                 continue
             
             src = os.path.join(self.temp_dir, filename)
