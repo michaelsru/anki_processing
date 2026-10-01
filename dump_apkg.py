@@ -6,6 +6,7 @@ import sqlite3
 import shutil
 import argparse
 from anki_unpacker import AnkiDeckUnpacker
+from card_format import format_card_line
 from verify_guids import verify
 
 def _get_notes_with_decks(db_path):
@@ -138,20 +139,10 @@ def _generate_html(notes, output_dir, deck_name):
     print(f"Done! Open this file to review: {html_path}")
 
 def _generate_text(notes_with_decks, output_dir):
-    """Generates a Raw Text File.
-    Format: [DeckName] [GUID] [mid:ID:FIELDCOUNT] Field1 :: Field2
-    Trailing empty fields are stripped from display; FIELDCOUNT carries the padding info.
-    """
+    """Writes cards.txt, one card_format line per note."""
     txt_path = os.path.join(output_dir, "cards.txt")
-    lines = []
-
-    for flds, guid, deck_name, mid, model_field_count in notes_with_decks:
-        fields = [f.strip().replace('\n', ' ') for f in flds.split('\x1f')]
-        # Strip trailing empty fields — count is encoded in the mid tag instead
-        while fields and not fields[-1]:
-            fields.pop()
-        line_content = " :: ".join(fields)
-        lines.append(f"[{deck_name}] [{guid}] [mid:{mid}:{model_field_count}] {line_content}")
+    lines = [format_card_line(deck_name, guid, mid, model_field_count, flds.split('\x1f'))
+             for flds, guid, deck_name, mid, model_field_count in notes_with_decks]
 
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))

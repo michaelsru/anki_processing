@@ -10,11 +10,8 @@ the keep/drop/merge decision to a human (or to Claude via the anki-cards skill).
     python check_overlap.py candidates/i2c.txt --annotate
     python check_overlap.py candidates/i2c.txt --json
 
-Card format is the one documented in template_cards.txt:
-
-    [DeckName] [GUID] [mid:ID:COUNT] Field1 :: Field2
-
-No genanki dependency — this runs without the venv.
+Card lines are parsed by card_format.py; the format is documented in
+template_cards.txt. No genanki dependency, so this runs without the venv.
 """
 
 import argparse
@@ -23,6 +20,8 @@ import json
 import os
 import re
 import sys
+
+from card_format import load_cards
 
 DEFAULT_CORPUS = os.path.join("anki_review_output", "cards.txt")
 DEFAULT_THRESHOLD = 0.5
@@ -46,87 +45,6 @@ _TAG_RE = re.compile(r'<[^>]+>')
 _WORD_RE = re.compile(r'\w+')
 # "# OVERLAP-DROPPED <card>" is a card --strict commented out, not an annotation.
 _ANNOTATION_RE = re.compile(r'^#\s*OVERLAP(?=\s|$)')
-_GROUP_CLOSE_RE = re.compile(r'\](?=\s|$)')
-
-
-# ---------------------------------------------------------------------------
-# Parsing
-# ---------------------------------------------------------------------------
-
-def split_bracket_groups(line, max_groups=3):
-    """Consume up to `max_groups` leading [...] groups. Returns (groups, remainder).
-
-    A group opens at a leading '[' and closes at the first ']' followed by
-    whitespace or end of line. Bracket depth can't be used: base91 GUIDs may
-    contain unbalanced '[' or ']' (e.g. [Pr0gsJ]<qW], [ab]]), but never
-    whitespace.
-    """
-    groups = []
-    rest = line.lstrip()
-
-    while len(groups) < max_groups and rest.startswith('['):
-        close = _GROUP_CLOSE_RE.search(rest, 1)
-        if not close:
-            break
-        groups.append(rest[1:close.start()])
-        rest = rest[close.start() + 1:].lstrip()
-
-    return groups, rest
-
-
-def parse_card_line(line):
-    """Parse one card line into a dict, or return None for comments/blanks.
-
-    Mirrors the tolerance of generate_anki_from_text.parse_deck_prefix: the
-    deck prefix is optional, the GUID is optional, the mid tag is optional.
-    """
-    stripped = line.strip()
-    if not stripped or stripped.startswith('#'):
-        return None
-
-    groups, content = split_bracket_groups(stripped)
-
-    deck = guid = mid = None
-    for g in groups:
-        if g.startswith('mid:'):
-            mid = g
-        elif deck is None and _looks_like_deck(g):
-            deck = g
-        elif guid is None:
-            guid = g
-
-    if not content:
-        return None
-
-    fields = [f.strip() for f in content.split(' :: ')]
-    if len(fields) == 1 and '{{c' not in content and '::' in content:
-        fields = [f.strip() for f in content.split('::')]
-
-    return {
-        'raw': stripped,
-        'deck': deck,
-        'guid': guid,
-        'mid': mid,
-        'front': fields[0],
-        'back': ' '.join(fields[1:]),
-    }
-
-
-def _looks_like_deck(value):
-    """Same heuristic generate_anki_from_text.parse_deck_prefix uses."""
-    return ('::' in value or ' ' in value
-            or value.replace('_', '').replace('-', '').isalnum())
-
-
-def load_cards(path):
-    cards = []
-    with open(path, 'r', encoding='utf-8') as f:
-        for lineno, line in enumerate(f, 1):
-            card = parse_card_line(line)
-            if card:
-                card['lineno'] = lineno
-                cards.append(card)
-    return cards
 
 
 # ---------------------------------------------------------------------------

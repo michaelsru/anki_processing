@@ -5,56 +5,16 @@ import unittest
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import card_format as cf
 import check_overlap as co
 
 
-class TestParsing(unittest.TestCase):
-    def test_full_prefix(self):
-        c = co.parse_card_line('[Deck::Sub] [g1] [mid:9999:2] Question :: Answer')
-        self.assertEqual(c['deck'], 'Deck::Sub')
-        self.assertEqual(c['guid'], 'g1')
-        self.assertEqual(c['mid'], 'mid:9999:2')
-        self.assertEqual(c['front'], 'Question')
-        self.assertEqual(c['back'], 'Answer')
-
-    def test_no_prefix(self):
-        c = co.parse_card_line('Question :: Answer')
-        self.assertIsNone(c['deck'])
-        self.assertIsNone(c['guid'])
-        self.assertEqual(c['front'], 'Question')
-
-    def test_deck_only(self):
-        c = co.parse_card_line('[My Deck] Question :: Answer')
-        self.assertEqual(c['deck'], 'My Deck')
-        self.assertIsNone(c['guid'])
-
-    def test_comments_and_blanks_skipped(self):
-        self.assertIsNone(co.parse_card_line('# a comment'))
-        self.assertIsNone(co.parse_card_line('   '))
-        self.assertIsNone(co.parse_card_line('# OVERLAP front=1.0 [D] [g] text :: more'))
-
-    def test_multiple_fields_joined_into_back(self):
-        c = co.parse_card_line('[D] [g] One :: Two :: Three')
-        self.assertEqual(c['front'], 'One')
-        self.assertEqual(c['back'], 'Two Three')
-
-    def test_guid_with_unbalanced_brackets(self):
-        c = co.parse_card_line('[Deck] [Pr0gsJ]<qW] [mid:1:2] Front :: Back')
-        self.assertEqual(c['deck'], 'Deck')
-        self.assertEqual(c['guid'], 'Pr0gsJ]<qW')
-        self.assertEqual(c['mid'], 'mid:1:2')
-        self.assertEqual(c['front'], 'Front')
-
-    def test_guid_ending_in_bracket(self):
-        c = co.parse_card_line('[D] [ab]] Q :: A')
-        self.assertEqual(c['guid'], 'ab]')
-        self.assertEqual(c['front'], 'Q')
-
+class TestGuidCollisions(unittest.TestCase):
     def test_bracket_guid_collision_detected(self):
         line = ('[Embedded] [Pr0gsJ]<qW] [mid:9988776655:2] {{c1::JTAG/SWD}} '
                 'are hardware debug interfaces.')
-        corpus = [co.parse_card_line(line)]
-        cands = [co.parse_card_line(line.replace('debug', 'programming'))]
+        corpus = [cf.parse_card_line(line)]
+        cands = [cf.parse_card_line(line.replace('debug', 'programming'))]
         collisions = co.find_guid_collisions(cands, corpus)
         self.assertEqual([c['guid'] for c in collisions], ['Pr0gsJ]<qW'])
 
@@ -92,7 +52,7 @@ class TestNormalization(unittest.TestCase):
 
 class TestScoring(unittest.TestCase):
     def _score(self, c1, c2):
-        a, b = co.parse_card_line(c1), co.parse_card_line(c2)
+        a, b = cf.parse_card_line(c1), cf.parse_card_line(c2)
         return co.score_pair(co.tokens_for(a), co.tokens_for(b))
 
     def test_near_identical_flagged(self):
@@ -165,12 +125,12 @@ class TestScoring(unittest.TestCase):
         self.assertFalse(s['swapped'])
 
     def test_report_labels_swapped_match_only(self):
-        reverse = co.parse_card_line(
+        reverse = cf.parse_card_line(
             '[D] [g1] sem_wait :: Decrements a semaphore count, blocking while it is zero')
         reverse['lineno'] = 1
-        same = co.parse_card_line('[D] [g3] What speed is I2C standard mode? :: 100 kHz')
+        same = cf.parse_card_line('[D] [g3] What speed is I2C standard mode? :: 100 kHz')
         same['lineno'] = 2
-        corpus = [co.parse_card_line(l) for l in (
+        corpus = [cf.parse_card_line(l) for l in (
             '[D] [g2] Which POSIX call decrements a semaphore count, blocking while it '
             'is zero? :: sem_wait',
             '[D] [g4] What is the standard-mode clock speed of I2C? :: 100 kHz')]
@@ -204,20 +164,20 @@ class TestFileOperations(unittest.TestCase):
             f.write('[D] [n2] How many wires does SPI use? :: Four.\n')
 
     def test_guid_collision_detected(self):
-        cands = co.load_cards(self.cand)
-        corpus = co.load_cards(self.corpus)
+        cands = cf.load_cards(self.cand)
+        corpus = cf.load_cards(self.corpus)
         self.assertEqual(co.find_guid_collisions(cands, corpus), [])
 
         with open(self.cand, 'a') as f:
             f.write('[D] [c1] Reused guid :: Bad.\n')
-        collisions = co.find_guid_collisions(co.load_cards(self.cand), corpus)
+        collisions = co.find_guid_collisions(cf.load_cards(self.cand), corpus)
         self.assertEqual(len(collisions), 1)
         self.assertEqual(collisions[0]['guid'], 'c1')
 
     def test_annotate_is_idempotent(self):
-        corpus = co.load_cards(self.corpus)
+        corpus = cf.load_cards(self.corpus)
         for _ in range(3):
-            results = co.find_overlaps(co.load_cards(self.cand), corpus,
+            results = co.find_overlaps(cf.load_cards(self.cand), corpus,
                                        co.DEFAULT_THRESHOLD)
             co.annotate_file(self.cand, results)
         with open(self.cand) as f:
@@ -226,17 +186,17 @@ class TestFileOperations(unittest.TestCase):
 
     def test_annotations_are_inert_comments(self):
         """Annotated files must not turn annotations into cards."""
-        corpus = co.load_cards(self.corpus)
-        results = co.find_overlaps(co.load_cards(self.cand), corpus, co.DEFAULT_THRESHOLD)
+        corpus = cf.load_cards(self.corpus)
+        results = co.find_overlaps(cf.load_cards(self.cand), corpus, co.DEFAULT_THRESHOLD)
         co.annotate_file(self.cand, results)
-        reparsed = co.load_cards(self.cand)
+        reparsed = cf.load_cards(self.cand)
         self.assertEqual(len(reparsed), 2)
         for c in reparsed:
             self.assertFalse(c['raw'].startswith('#'))
 
     def test_clean_removes_annotations(self):
-        corpus = co.load_cards(self.corpus)
-        results = co.find_overlaps(co.load_cards(self.cand), corpus, co.DEFAULT_THRESHOLD)
+        corpus = cf.load_cards(self.corpus)
+        results = co.find_overlaps(cf.load_cards(self.cand), corpus, co.DEFAULT_THRESHOLD)
         co.annotate_file(self.cand, results)
         removed = co.strip_annotations(self.cand)
         self.assertEqual(removed, 1)
@@ -247,8 +207,8 @@ class TestFileOperations(unittest.TestCase):
         """--strict comments a card out as '# OVERLAP-DROPPED <card>'. That line
         is the only copy of the card left, so --clean and later annotation runs
         must keep it."""
-        corpus = co.load_cards(self.corpus)
-        results = co.find_overlaps(co.load_cards(self.cand), corpus, co.DEFAULT_THRESHOLD)
+        corpus = cf.load_cards(self.corpus)
+        results = co.find_overlaps(cf.load_cards(self.cand), corpus, co.DEFAULT_THRESHOLD)
         co.comment_out_flagged(self.cand, results)
         dropped = '# OVERLAP-DROPPED [D] [n1] Define priority inversion. :: A low-priority task holds a lock.\n'
         with open(self.cand) as f:
@@ -258,7 +218,7 @@ class TestFileOperations(unittest.TestCase):
         with open(self.cand) as f:
             self.assertIn(dropped, f.readlines())
 
-        results = co.find_overlaps(co.load_cards(self.cand), corpus, co.DEFAULT_THRESHOLD)
+        results = co.find_overlaps(cf.load_cards(self.cand), corpus, co.DEFAULT_THRESHOLD)
         co.annotate_file(self.cand, results)
         with open(self.cand) as f:
             self.assertIn(dropped, f.readlines())
@@ -271,7 +231,7 @@ class TestFileOperations(unittest.TestCase):
         with open(self.cand, 'w') as f:
             f.write('[D] [n1] What speed is I2C standard mode? :: 100 kHz\n')
             f.write('[D] [n2] What is the I2C standard mode speed? :: 100 kHz\n')
-        results = co.find_overlaps(co.load_cards(self.cand), [], co.DEFAULT_THRESHOLD)
+        results = co.find_overlaps(cf.load_cards(self.cand), [], co.DEFAULT_THRESHOLD)
         self.assertEqual(len(results), 2)
         self.assertEqual(results[0]['matches'][0]['source'], 'candidate')
 
