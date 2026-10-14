@@ -248,6 +248,11 @@ form, one recallable idea each, scope labels, generalization, explicit GUIDs, th
 overlap check. Splitting one selected fact into two cards is fine when the
 atomize rule demands it. Adding a fact the teacher didn't select is not.
 
+A selection whose reason starts `keystone:` is a question, not a fact. Author it
+in the question form, `Question?<br>{{c1::answer}}`, and keep the teacher's
+one-sentence answer. Do not turn it into a declarative cloze, because recalling
+the conclusion is not the same as applying the root to the case.
+
 A few more things:
 
 - **`[ ]` means unauthored, a GUID means done.** Write the GUID you allocate back
